@@ -9,6 +9,10 @@ exports.buildElementLUT = require('./core.cjs').buildElementLUT;
 exports.renderFusedCluster = require('./core.cjs').renderFusedCluster;
 exports.blendSurfaces = require('./core.cjs').blendSurfaces;
 exports.sampleTable = require('./core.cjs').sampleTable;
+exports.setUseWebGL = require('./core.cjs').setUseWebGL;
+exports.isWebGLActive = require('./core.cjs').isWebGLActive;
+
+exports.WebGLGlassRenderer = require('./webgl.cjs').WebGLGlassRenderer;
 
 exports._T0 = require('./tables.cjs')._T0;
 exports._T1 = require('./tables.cjs')._T1;

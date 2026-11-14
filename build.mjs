@@ -6,7 +6,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const srcDir = path.join(__dirname, 'src');
 const distDir = path.join(__dirname, 'dist');
 
-const files = ['tables', 'core', 'index', 'react', 'vue', 'svelte', 'angular', 'solid'];
+const files = ['tables', 'webgl', 'core', 'index', 'react', 'vue', 'svelte', 'angular', 'solid'];
 
 for (const name of files) {
   const rawContent = fs.readFileSync(path.join(srcDir, `${name}.js`), 'utf8');
