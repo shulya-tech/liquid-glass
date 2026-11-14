@@ -6,7 +6,7 @@ on:
       - main
 
 permissions:
-  contents: read
+  contents: write
   id-token: write
 
 jobs:
@@ -16,6 +16,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Node.js (with OIDC Trusted Publishing)
         uses: actions/setup-node@v4
@@ -29,18 +31,35 @@ jobs:
       - name: Build package
         run: npm run build
 
-      - name: Auto-bump patch version if current version already exists on npm
+      - name: Check and synchronize version with npm
+        id: versioning
         run: |
           LOCAL_VER=$(node -p "require('./package.json').version")
           EXISTING=$(npm view "@shulya/liquid-glass@$LOCAL_VER" version 2>/dev/null || echo "")
+          
           if [ -n "$EXISTING" ]; then
             LATEST_VER=$(npm view @shulya/liquid-glass version 2>/dev/null || echo "$LOCAL_VER")
-            echo "Version $LOCAL_VER is already published (latest on npm is $LATEST_VER). Auto-incrementing patch..."
+            echo "Version $LOCAL_VER is already published on npm (latest is $LATEST_VER)."
+            echo "Auto-incrementing patch version..."
             npm version "$LATEST_VER" --no-git-tag-version --allow-same-version
             npm version patch --no-git-tag-version
+            NEW_VER=$(node -p "require('./package.json').version")
+            echo "bumped=true" >> "$GITHUB_OUTPUT"
+            echo "version=$NEW_VER" >> "$GITHUB_OUTPUT"
           else
-            echo "Publishing new version $LOCAL_VER..."
+            echo "Publishing new version $LOCAL_VER directly..."
+            echo "bumped=false" >> "$GITHUB_OUTPUT"
+            echo "version=$LOCAL_VER" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Publish to npmjs via OIDC Trusted Publisher
         run: npm publish --provenance --access public
+
+      - name: Commit and push updated version to GitHub
+        if: steps.versioning.outputs.bumped == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add package.json
+          git commit -m "chore(release): bump version to ${{ steps.versioning.outputs.version }} [skip ci]"
+          git push origin main

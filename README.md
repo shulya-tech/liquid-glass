@@ -1,6 +1,6 @@
 # `@shulya/liquid-glass`
 
-[![npm version](https://img.shields.io/badge/npm-v1.0.0-007aff?style=flat-square)](https://www.npmjs.com/package/@shulya/liquid-glass)
+[![npm version](https://img.shields.io/badge/npm-v1.0.1-007aff?style=flat-square)](https://www.npmjs.com/package/@shulya/liquid-glass)
 [![Live Demo](https://img.shields.io/badge/Live%20Demo-liquid.shulya.tech-ff2d55?style=flat-square)](https://liquid.shulya.tech)
 [![GitHub Repo](https://img.shields.io/badge/GitHub-shulya--tech%2Fliquid--glass-181717?style=flat-square&logo=github)](https://github.com/shulya-tech/liquid-glass)
 [![Zero WebGL](<https://img.shields.io/badge/WebGL-None%20(100%25%20DOM%20%2F%202D%20LUT)-30d158?style=flat-square>)](#why-shulyaliquid-glass)
@@ -13,7 +13,7 @@
 - **NPM Package:** [https://www.npmjs.com/package/@shulya/liquid-glass](https://www.npmjs.com/package/@shulya/liquid-glass)
 - **GitHub Repository:** [https://github.com/shulya-tech/liquid-glass](https://github.com/shulya-tech/liquid-glass)
 
-![Liquid Glass Interactive Playground](./screen.png)
+![Liquid Glass Interactive Playground](https://raw.githubusercontent.com/shulya-tech/liquid-glass/main/screen.png)
 
 ---
 
@@ -44,7 +44,7 @@ yarn add @shulya/liquid-glass
 > **Try it online right now:** [**https://liquid.shulya.tech**](https://liquid.shulya.tech)  
 > **Source code on GitHub:** [**github.com/shulya-tech/liquid-glass/tree/main/example**](https://github.com/shulya-tech/liquid-glass/tree/main/example)
 
-![Interactive React Playground Preview](./screen.png)
+![Interactive React Playground Preview](https://raw.githubusercontent.com/shulya-tech/liquid-glass/main/screen.png)
 
 The repository includes a complete **React + Vite** interactive playground in [`example/`](./example/) ([`example/src/App.jsx`](./example/src/App.jsx)) where you can drag three `<LiquidGlass>` components (a `136×74` capsule slider, a `196×116` rounded card, and a `112×112` circular lens) across a high-contrast optical test stage with a green pill track, diagonal rainbow ribbon, sunset sphere, black/white stripe grating, and centered `"Shulya"` typography.
 

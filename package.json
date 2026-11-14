@@ -1,6 +1,6 @@
 {
   "name": "@shulya/liquid-glass",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "High-performance, zero-WebGL Liquid Glass optical UI engine with pre-computed empirical lookup tables for React, Vue, Svelte, Angular, SolidJS, and Vanilla JS.",
   "author": "Shulya (https://shulya.tech)",
   "homepage": "https://liquid.shulya.tech",
@@ -66,16 +66,7 @@
   },
   "files": [
     "dist",
-    "src",
     "types",
-    "example/index.html",
-    "example/package.json",
-    "example/vite.config.js",
-    "example/README.md",
-    "example/src",
-    "tables/optical_calibration_matrix.xlsx",
-    "tables/optical_calibration_matrix.csv",
-    "screen.png",
     "README.md",
     "LICENSE"
   ],
@@ -84,6 +75,7 @@
   },
   "scripts": {
     "build": "node build.mjs",
+    "build:example": "node build.mjs && cd example && npm install && npm run build",
     "example": "cd example && npm install && npm run dev",
     "prepublishOnly": "node build.mjs"
   },
