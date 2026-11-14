@@ -12,6 +12,58 @@ import {
 } from '@shulya/liquid-glass/react';
 
 /**
+ * «Золотое сечение» DPR на старте (computeOptimalDpr):
+ * 1. Обычные экраны (DPR <= 1.5): рендерятся 1:1 в нативном DPR.
+ * 2. Десктопы и Retina Mac (DPR 2.0): мощные GPU десктопа легко тянут полное разрешение — рендерятся в нативном 2.0+.
+ * 3. Смартфоны со сверхплотными экранами (iPhone 12–17 с DPR 3.0, Android 2.6–3.5):
+ *    - Проверяется количество ядер процессора (navigator.hardwareConcurrency).
+ *    - iPhone 12 (чип A14, 6 ядер) и аналоги: золотая середина DPR = 2.0 (307 PPI, на 56% меньше вычислений).
+ *    - Флагманы с 8+ ядрами стартуют с 2.5.
+ */
+export function computeOptimalDpr() {
+  if (typeof window === 'undefined') return 1;
+
+  const nativeDpr = window.devicePixelRatio || 1;
+
+  // Обычные экраны (DPR <= 1.5): рендерятся 1:1 в нативном DPR
+  if (nativeDpr <= 1.5) {
+    return nativeDpr;
+  }
+
+  // Определение мобильного устройства / смартфона
+  const isMobile =
+    typeof navigator !== 'undefined' &&
+    (/Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ||
+      (typeof window !== 'undefined' &&
+        window.matchMedia &&
+        (window.matchMedia('(pointer: coarse)').matches ||
+          window.matchMedia('(max-width: 820px)').matches)));
+
+  // Десктопы и Retina Mac: мощные GPU десктопа легко тянут нативное разрешение
+  if (!isMobile) {
+    return nativeDpr;
+  }
+
+  // Смартфоны со сверхплотными экранами (DPR > 2.0)
+  if (nativeDpr > 2.0) {
+    const cores =
+      typeof navigator !== 'undefined' && typeof navigator.hardwareConcurrency === 'number'
+        ? navigator.hardwareConcurrency
+        : 6;
+
+    // Флагманы с 8+ ядрами стартуют с 2.5
+    if (cores >= 8) {
+      return Math.min(nativeDpr, 2.5);
+    }
+
+    // iPhone 12 (чип A14, 6 ядер) и аналоги: золотая середина DPR = 2.0 (-56% вычислений)
+    return 2.0;
+  }
+
+  return nativeDpr;
+}
+
+/**
  * High-DPI optical test stage:
  * - Architectural grid (80px step)
  * - Green pill switch track (250x108, r: 54, green gradient #30d158 -> #248a3d, soft green glow)
@@ -21,19 +73,11 @@ import {
  * - High-contrast black/white stripes (240x48, r: 24, 24px grating)
  * - Bold center typography "Shulya" (800 weight with subtle drop shadow)
  */
-function drawStageBackground(canvas) {
+function drawStageBackground(canvas, dpr = computeOptimalDpr()) {
   if (!canvas) return;
   const rect = canvas.getBoundingClientRect();
   const w = Math.max(1, Math.round(rect.width || window.innerWidth));
   const h = Math.max(1, Math.round(rect.height || window.innerHeight));
-  const isMobileScreen =
-    typeof navigator !== 'undefined' &&
-    (/Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ||
-      (typeof window !== 'undefined' &&
-        window.matchMedia &&
-        (window.matchMedia('(pointer: coarse)').matches ||
-          window.matchMedia('(max-width: 768px)').matches)));
-  const dpr = isMobileScreen ? 1 : Math.min(window.devicePixelRatio || 1, 1.5);
 
   canvas.width = Math.floor(w * dpr);
   canvas.height = Math.floor(h * dpr);
@@ -242,7 +286,12 @@ export default function App() {
   const [height, setHeight] = useState(OPTICAL_DEFAULTS.height);
   const [frosted, setFrosted] = useState(OPTICAL_DEFAULTS.frosted);
   const [fusion, setFusion] = useState(OPTICAL_DEFAULTS.fusion);
-  const [fps, setFps] = useState(120);
+
+  // 1. «Золотое сечение» на старте (computeOptimalDpr)
+  const initialDpr = computeOptimalDpr();
+  const [dpr, setDpr] = useState(initialDpr);
+  const dprRef = useRef(initialDpr);
+  dprRef.current = dpr;
 
   // 3 draggable glass bodies with top-left positioning
   const [shapes, setShapes] = useState(() => {
@@ -258,7 +307,7 @@ export default function App() {
     if (!canvas) return;
 
     const syncStage = () => {
-      drawStageBackground(canvas);
+      drawStageBackground(canvas, dprRef.current);
       scheduleStageRedraw();
     };
 
@@ -278,26 +327,52 @@ export default function App() {
   }, []);
 
   useLayoutEffect(() => {
+    if (stageRef.current) {
+      drawStageBackground(stageRef.current, dpr);
+    }
     scheduleStageRedraw();
-  }, [shapes, rim, ior, height, frosted, fusion]);
+  }, [dpr, shapes, rim, ior, height, frosted, fusion]);
 
-  // FPS monitor
+  // 2. Динамический регулятор FPS в реальном времени (stepAnimation):
+  // Если 3 кадра подряд длятся > 22 мс (FPS < 45), плавно адаптируем DPR на ступень вниз (* 0.85, не ниже 1.35)
   useEffect(() => {
-    let frameCount = 0;
-    let lastTime = performance.now();
+    let lastFrameTime = performance.now();
+    let consecutiveSlowFrames = 0;
+    let lastDprDropTime = 0;
     let rafId;
 
-    const tick = (now) => {
-      frameCount++;
-      if (now - lastTime >= 500) {
-        setFps(Math.min(120, Math.round((frameCount * 1000) / (now - lastTime))));
-        frameCount = 0;
-        lastTime = now;
+    const stepAnimation = (timestamp) => {
+      const frameDelta = timestamp - lastFrameTime;
+      lastFrameTime = timestamp;
+
+      // Фильтруем паузы вкладки и фоновый режим
+      const isVisible = typeof document === 'undefined' || !document.hidden;
+      if (isVisible && frameDelta > 0 && frameDelta <= 2000) {
+        // > 22 мс соответствует падению FPS ниже 45
+        if (frameDelta > 22) {
+          consecutiveSlowFrames++;
+          // Если 3 кадра подряд длятся > 22 мс:
+          if (consecutiveSlowFrames >= 3 && timestamp - lastDprDropTime >= 100) {
+            const current = dprRef.current;
+            const nextDpr = Math.max(1.35, +(current * 0.85).toFixed(2));
+            if (nextDpr < current) {
+              setDpr(nextDpr);
+              lastDprDropTime = timestamp;
+            }
+            consecutiveSlowFrames = 0;
+          }
+        } else {
+          // Если кадр выполнился быстро (<= 22 мс), сбрасываем серию медленных кадров
+          consecutiveSlowFrames = 0;
+        }
+      } else {
+        consecutiveSlowFrames = 0;
       }
-      rafId = requestAnimationFrame(tick);
+
+      rafId = requestAnimationFrame(stepAnimation);
     };
 
-    rafId = requestAnimationFrame(tick);
+    rafId = requestAnimationFrame(stepAnimation);
     return () => cancelAnimationFrame(rafId);
   }, []);
 
@@ -360,6 +435,7 @@ export default function App() {
           height={height}
           frosted={frosted}
           fusion={fusion}
+          dpr={dpr}
           className="glass-body"
           data-lg-tint="rgba(255, 255, 255, 0.04)"
           onPointerDown={(e) => handlePointerDown(s.id, e)}
@@ -444,8 +520,6 @@ export default function App() {
           />
           <span>Liquid Fusion</span>
         </label>
-
-        <div className="fps-tag">{fps} FPS</div>
       </div>
     </>
   );
