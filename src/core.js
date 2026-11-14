@@ -1007,15 +1007,21 @@ function renderAllActiveLenses() {
         clusterOverlayCanvas.style.display = 'block';
         clusterOverlayCanvas.style.filter = 'none';
 
-        // Match z-index to highest element in the cluster so it never pops above floating menus/controls
-        let maxZ = 20;
+        // Keep cluster overlay in the same parent container and stacking context as the glass bodies
+        const targetParent = (primaryCtrl.element && primaryCtrl.element.parentElement) || document.body;
+        if (clusterOverlayCanvas.parentElement !== targetParent) {
+          targetParent.appendChild(clusterOverlayCanvas);
+        }
+
+        // Match z-index to lowest element in the cluster so it never pops above floating menus/controls
+        let clusterZ = 20;
         for (const item of group) {
           if (item.ctrl && item.ctrl.element) {
             const z = parseInt(window.getComputedStyle(item.ctrl.element).zIndex, 10);
-            if (!Number.isNaN(z) && z > maxZ) maxZ = z;
+            if (!Number.isNaN(z)) clusterZ = Math.min(clusterZ, z);
           }
         }
-        clusterOverlayCanvas.style.zIndex = String(maxZ);
+        clusterOverlayCanvas.style.zIndex = String(clusterZ);
 
         clusterOverlayCanvas.style.transform = `translate3d(${box.cMinX / dpr}px, ${box.cMinY / dpr}px, 0)`;
         clusterOverlayCanvas.style.width = `${box.boxW / dpr}px`;
