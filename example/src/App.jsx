@@ -417,25 +417,46 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    let rafMoveId = null;
+    let pendingCoords = null;
+
     const handlePointerMove = (e) => {
       if (!dragState.current) return;
       const { id, offX, offY } = dragState.current;
-      const nextX = e.clientX - offX;
-      const nextY = e.clientY - offY;
+      pendingCoords = { id, nextX: e.clientX - offX, nextY: e.clientY - offY };
 
-      setShapes((prev) =>
-        prev.map((s) => (s.id === id ? { ...s, x: nextX, y: nextY } : s))
-      );
+      if (!rafMoveId) {
+        rafMoveId = requestAnimationFrame(() => {
+          rafMoveId = null;
+          if (!pendingCoords) return;
+          const { id: targetId, nextX, nextY } = pendingCoords;
+          setShapes((prev) =>
+            prev.map((s) => (s.id === targetId ? { ...s, x: nextX, y: nextY } : s))
+          );
+        });
+      }
     };
 
     const handlePointerUp = () => {
+      if (rafMoveId) {
+        cancelAnimationFrame(rafMoveId);
+        rafMoveId = null;
+      }
+      if (pendingCoords) {
+        const { id: targetId, nextX, nextY } = pendingCoords;
+        pendingCoords = null;
+        setShapes((prev) =>
+          prev.map((s) => (s.id === targetId ? { ...s, x: nextX, y: nextY } : s))
+        );
+      }
       dragState.current = null;
     };
 
-    window.addEventListener('pointermove', handlePointerMove);
-    window.addEventListener('pointerup', handlePointerUp);
-    window.addEventListener('pointercancel', handlePointerUp);
+    window.addEventListener('pointermove', handlePointerMove, { passive: true });
+    window.addEventListener('pointerup', handlePointerUp, { passive: true });
+    window.addEventListener('pointercancel', handlePointerUp, { passive: true });
     return () => {
+      if (rafMoveId) cancelAnimationFrame(rafMoveId);
       window.removeEventListener('pointermove', handlePointerMove);
       window.removeEventListener('pointerup', handlePointerUp);
       window.removeEventListener('pointercancel', handlePointerUp);

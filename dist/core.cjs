@@ -861,28 +861,16 @@ function checkCanvasFilterBlur() {
   if (typeof document === 'undefined') return false;
   try {
     const testC = document.createElement('canvas');
-    testC.width = 4;
-    testC.height = 4;
     const testCtx = testC.getContext('2d');
-    if (!testCtx || typeof testCtx.filter !== 'string') {
-      return (supportsCanvasFilterBlur = false);
-    }
-    testCtx.fillStyle = '#000';
-    testCtx.fillRect(0, 0, 4, 4);
-    testCtx.filter = 'blur(2px)';
-    testCtx.fillStyle = '#fff';
-    testCtx.fillRect(0, 0, 2, 2);
-    testCtx.filter = 'none';
-    const imgData = testCtx.getImageData(0, 0, 4, 4).data;
-    supportsCanvasFilterBlur = imgData[15 * 4] > 0 || imgData[14 * 4] > 0 || imgData[11 * 4] > 0;
+    supportsCanvasFilterBlur = Boolean(testCtx && typeof testCtx.filter === 'string');
     return supportsCanvasFilterBlur;
   } catch {
     return (supportsCanvasFilterBlur = false);
   }
 }
 
-  // 5. Blur buffer for frosted glass (Robust across all mobile WebKit & Blink engines)
-  if (neededBlur > 0) {
+  // 5. Blur buffer for frosted glass (Native hardware-accelerated blur across Chrome, Safari & mobile)
+  if (neededBlur > 0 && !useWebGL) {
     lastFrostedRadius = neededBlur;
     blurCtx.clearRect(0, 0, bw, bh);
 
@@ -891,14 +879,18 @@ function checkCanvasFilterBlur() {
       blurCtx.drawImage(stageCanvas, 0, 0);
       blurCtx.filter = 'none';
     } else {
-      // Hardware-accelerated multi-step pyramid downscale/upscale blur for iOS Safari and mobile WebKit
-      const factor = Math.max(0.04, 1.0 / (1.0 + neededBlur * 0.45));
-      const pw = Math.max(4, Math.round(bw * factor));
-      const ph = Math.max(4, Math.round(bh * factor));
+      // Smooth multi-step pyramid downscale/upscale fallback for legacy engines
+      const factor = Math.max(0.2, 1.0 / (1.0 + neededBlur * 0.25));
+      const midW = Math.max(32, Math.round(bw * 0.5));
+      const midH = Math.max(32, Math.round(bh * 0.5));
+      const pw = Math.max(16, Math.round(bw * factor));
+      const ph = Math.max(16, Math.round(bh * factor));
       blurCtx.imageSmoothingEnabled = true;
       blurCtx.imageSmoothingQuality = 'high';
-      blurCtx.drawImage(stageCanvas, 0, 0, pw, ph);
-      blurCtx.drawImage(blurCanvas, 0, 0, pw, ph, 0, 0, bw, bh);
+      blurCtx.drawImage(stageCanvas, 0, 0, midW, midH);
+      blurCtx.drawImage(blurCanvas, 0, 0, midW, midH, 0, 0, pw, ph);
+      blurCtx.drawImage(blurCanvas, 0, 0, pw, ph, 0, 0, midW, midH);
+      blurCtx.drawImage(blurCanvas, 0, 0, midW, midH, 0, 0, bw, bh);
     }
   }
 }
@@ -1017,6 +1009,8 @@ function areRectsTouching(r1, r2, threshold = 34) {
   return Math.hypot(dx, dy) < threshold;
 }
 
+let stageDirty = true;
+
 function renderAllActiveLenses() {
   rafScheduled = false;
   if (typeof document === 'undefined' || controllerRegistry.size === 0) return;
@@ -1060,7 +1054,12 @@ function renderAllActiveLenses() {
     return;
   }
 
-  captureViewportStage(maxFrosted, activeDpr);
+  // Fast-path: Skip expensive DOM queries and 2D canvas repaints while dragging lenses
+  const needsCapture = stageDirty || !stageCanvas || (useWebGL && !webglRenderer?.hasSourceTex);
+  if (needsCapture) {
+    captureViewportStage(maxFrosted, activeDpr);
+    stageDirty = false;
+  }
 
   // WebGL Fast-Path: 100% GPU Execution, zero CPU loops, 60-120 FPS
   if (useWebGL && ensureWebGLRenderer(activeDpr)) {
@@ -1084,13 +1083,16 @@ function renderAllActiveLenses() {
       }
 
       const primaryCtrl = visible[visible.length - 1].ctrl;
-      const sourceCanvas = primaryCtrl.options.frosted > 0 ? blurCanvas : stageCanvas;
 
       webglRenderer.render({
-        sourceCanvas,
+        sourceCanvas: stageCanvas,
         elements,
-        options: primaryCtrl.options,
-        dpr
+        options: {
+          ...primaryCtrl.options,
+          frosted: maxFrosted
+        },
+        dpr,
+        sourceCanvasDirty: needsCapture
       });
 
       if (webglCanvas) {
@@ -1101,8 +1103,8 @@ function renderAllActiveLenses() {
         for (let i = 0; i < visible.length; i++) {
           const item = visible[i];
           if (item.ctrl && item.ctrl.element) {
-            const z = parseInt(window.getComputedStyle(item.ctrl.element).zIndex, 10);
-            if (!Number.isNaN(z) && z > maxZ) maxZ = z;
+            const z = parseInt(item.ctrl.element.style?.zIndex, 10) || item.ctrl._cachedZIndex || 20;
+            if (z > maxZ) maxZ = z;
           }
         }
         webglCanvas.style.zIndex = String(maxZ);
@@ -1200,8 +1202,8 @@ function renderAllActiveLenses() {
         let maxZ = 20;
         for (const item of group) {
           if (item.ctrl && item.ctrl.element) {
-            const z = parseInt(window.getComputedStyle(item.ctrl.element).zIndex, 10);
-            if (!Number.isNaN(z) && z > maxZ) maxZ = z;
+            const z = parseInt(item.ctrl.element.style?.zIndex, 10) || item.ctrl._cachedZIndex || 20;
+            if (z > maxZ) maxZ = z;
           }
         }
         clusterOverlayCanvas.style.zIndex = String(maxZ);
@@ -1218,7 +1220,8 @@ function renderAllActiveLenses() {
   }
 }
 
-exports.scheduleStageRedraw = function scheduleStageRedraw() {
+exports.scheduleStageRedraw = function scheduleStageRedraw(dirty = false) {
+  if (dirty) stageDirty = true;
   if (typeof window === 'undefined') return;
   if (rafScheduled) return;
   rafScheduled = true;
@@ -1228,13 +1231,14 @@ exports.scheduleStageRedraw = function scheduleStageRedraw() {
 function attachGlobalStageListeners() {
   if (listenersAttached || typeof window === 'undefined') return;
   listenersAttached = true;
-  window.addEventListener('scroll', scheduleStageRedraw, { passive: true });
-  window.addEventListener('resize', scheduleStageRedraw, { passive: true });
+  window.addEventListener('scroll', () => { stageDirty = true; scheduleStageRedraw(true); }, { passive: true });
+  window.addEventListener('resize', () => { stageDirty = true; scheduleStageRedraw(true); }, { passive: true });
 
-  // Continuous 30fps sync with ambient background canvas animation
+  // Ambient 8fps background sync (125ms interval: preserves live ambient backgrounds without drag lag)
   const tick = () => {
-    scheduleStageRedraw();
-    window.setTimeout(() => window.requestAnimationFrame(tick), 32);
+    stageDirty = true;
+    scheduleStageRedraw(true);
+    window.setTimeout(() => window.requestAnimationFrame(tick), 125);
   };
   window.requestAnimationFrame(tick);
 }
@@ -1326,7 +1330,7 @@ const LiquidGlassController = exports.LiquidGlassController = class LiquidGlassC
             this.element.style.backgroundColor = 'transparent';
           }
         }
-        scheduleStageRedraw();
+        scheduleStageRedraw(false);
       });
       this._mo.observe(this.element, { attributes: true, attributeFilter: ['style', 'class'] });
       if (this.element.parentElement) {
@@ -1338,7 +1342,7 @@ const LiquidGlassController = exports.LiquidGlassController = class LiquidGlassC
     }
 
     this._mounted = true;
-    scheduleStageRedraw();
+    scheduleStageRedraw(true);
   }
 
   _getRadius() {
@@ -1396,12 +1400,12 @@ const LiquidGlassController = exports.LiquidGlassController = class LiquidGlassC
       this._lut = null;
     }
     if (changed) {
-      scheduleStageRedraw();
+      scheduleStageRedraw(true);
     }
   }
 
   refresh() {
-    scheduleStageRedraw();
+    scheduleStageRedraw(true);
   }
 
   destroy() {
