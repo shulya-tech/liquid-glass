@@ -4,7 +4,11 @@
 - **NPM Package:** [https://www.npmjs.com/package/@shulya/liquid-glass](https://www.npmjs.com/package/@shulya/liquid-glass)
 - **GitHub Repository:** [https://github.com/shulya-tech/liquid-glass](https://github.com/shulya-tech/liquid-glass)
 
-![Liquid Glass React Playground](../screen.png)
+<p align="center">
+  <img src="../desktop.png" alt="Liquid Glass React Playground" width="100%" />
+  <br />
+  <sub><b>Interactive React Playground:</b> Live optical refraction, chromatic dispersion, and control shelf.</sub>
+</p>
 
 This directory contains a complete **React + Vite** application demonstrating the `<LiquidGlass>` component from `@shulya/liquid-glass/react`.
 

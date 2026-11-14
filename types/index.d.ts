@@ -77,6 +77,20 @@ export declare function createLiquidGlass(
 ): LiquidGlassController;
 
 export declare function scheduleStageRedraw(): void;
+export declare function setUseWebGL(enabled: boolean): void;
+export declare function isWebGLActive(): boolean;
+
+export declare class WebGLGlassRenderer {
+  canvas: HTMLCanvasElement;
+  constructor(canvas: HTMLCanvasElement);
+  render(config: {
+    sourceCanvas: HTMLCanvasElement;
+    elements: any[];
+    options: any;
+    dpr: number;
+  }): void;
+  destroy(): void;
+}
 
 export declare function sampleTable(table: Float32Array, u: number): number;
 export declare function blendSurfaces(d1: number, d2: number, span: number): number;

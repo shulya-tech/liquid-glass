@@ -25,5 +25,12 @@ export declare const LiquidGlass: React.ForwardRefExoticComponent<
   LiquidGlassProps & React.RefAttributes<HTMLElement>
 >;
 
-export { LiquidGlassController, OPTICAL_DEFAULTS, OPTICAL_LIMITS, scheduleStageRedraw };
+export {
+  LiquidGlassController,
+  OPTICAL_DEFAULTS,
+  OPTICAL_LIMITS,
+  scheduleStageRedraw,
+  setUseWebGL,
+  isWebGLActive
+};
 export default LiquidGlass;
