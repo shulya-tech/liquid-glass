@@ -4,9 +4,16 @@ on:
   push:
     branches:
       - main
+    paths:
+      - 'src/**'
+      - 'types/**'
+      - 'tables/**'
+      - 'build.mjs'
+      - 'package.json'
+  workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
   id-token: write
 
 jobs:
@@ -16,8 +23,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Node.js (with OIDC Trusted Publishing)
         uses: actions/setup-node@v4
@@ -28,38 +33,43 @@ jobs:
       - name: Ensure latest npm CLI for OIDC support
         run: npm install -g npm@latest
 
+      - name: Check if local version is newer than npm
+        id: check-version
+        run: |
+          node -e '
+            const cp = require("child_process");
+            const fs = require("fs");
+            const local = require("./package.json").version;
+            let latest = "0.0.0";
+            try {
+              latest = cp.execSync("npm view @shulya/liquid-glass version", { encoding: "utf8" }).trim();
+            } catch (e) {}
+
+            function parse(v) {
+              return v.split("-")[0].split(".").map(Number);
+            }
+            function isGreater(a, b) {
+              const pa = parse(a), pb = parse(b);
+              for (let i = 0; i < 3; i++) {
+                if ((pa[i] || 0) > (pb[i] || 0)) return true;
+                if ((pa[i] || 0) < (pb[i] || 0)) return false;
+              }
+              return false;
+            }
+
+            const shouldPublish = isGreater(local, latest);
+            if (shouldPublish) {
+              console.log(`Local version (${local}) is newer than npm (${latest}) -> Publishing!`);
+            } else {
+              console.log(`Local version (${local}) is same or older than npm (${latest}) -> Skipping publish.`);
+            }
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, `should_publish=${shouldPublish}\n`);
+          '
+
       - name: Build package
+        if: steps.check-version.outputs.should_publish == 'true'
         run: npm run build
 
-      - name: Check and synchronize version with npm
-        id: versioning
-        run: |
-          LOCAL_VER=$(node -p "require('./package.json').version")
-          EXISTING=$(npm view "@shulya/liquid-glass@$LOCAL_VER" version 2>/dev/null || echo "")
-          
-          if [ -n "$EXISTING" ]; then
-            LATEST_VER=$(npm view @shulya/liquid-glass version 2>/dev/null || echo "$LOCAL_VER")
-            echo "Version $LOCAL_VER is already published on npm (latest is $LATEST_VER)."
-            echo "Auto-incrementing patch version..."
-            npm version "$LATEST_VER" --no-git-tag-version --allow-same-version
-            npm version patch --no-git-tag-version
-            NEW_VER=$(node -p "require('./package.json').version")
-            echo "bumped=true" >> "$GITHUB_OUTPUT"
-            echo "version=$NEW_VER" >> "$GITHUB_OUTPUT"
-          else
-            echo "Publishing new version $LOCAL_VER directly..."
-            echo "bumped=false" >> "$GITHUB_OUTPUT"
-            echo "version=$LOCAL_VER" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Publish to npmjs via OIDC Trusted Publisher
+        if: steps.check-version.outputs.should_publish == 'true'
         run: npm publish --provenance --access public
-
-      - name: Commit and push updated version to GitHub
-        if: steps.versioning.outputs.bumped == 'true'
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add package.json
-          git commit -m "chore(release): bump version to ${{ steps.versioning.outputs.version }} [skip ci]"
-          git push origin main

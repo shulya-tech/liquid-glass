@@ -1,6 +1,6 @@
 {
   "name": "@shulya/liquid-glass",
-  "version": "1.0.1",
+  "version": "1.0.3",
   "description": "High-performance, zero-WebGL Liquid Glass optical UI engine with pre-computed empirical lookup tables for React, Vue, Svelte, Angular, SolidJS, and Vanilla JS.",
   "author": "Shulya (https://shulya.tech)",
   "homepage": "https://liquid.shulya.tech",
