@@ -448,11 +448,18 @@ function getReadableStrokeColor(borderCol, fallback = 'rgba(148, 163, 184, 0.55)
   return fallback;
 }
 
+function getDevicePixelRatio() {
+  return typeof window !== 'undefined' ? Math.min(window.devicePixelRatio || 1, 2) : 1;
+}
+
 function ensureStageBuffers() {
   if (typeof document === 'undefined') return false;
+  const dpr = getDevicePixelRatio();
   const docEl = document.documentElement;
   const vw = Math.max(1, window.innerWidth, docEl ? docEl.clientWidth : 0);
   const vh = Math.max(1, window.innerHeight, docEl ? docEl.clientHeight : 0);
+  const bufW = Math.round(vw * dpr);
+  const bufH = Math.round(vh * dpr);
 
   if (!stageCanvas) {
     stageCanvas = document.createElement('canvas');
@@ -461,11 +468,11 @@ function ensureStageBuffers() {
     blurCtx = blurCanvas.getContext('2d', { willReadFrequently: true });
   }
 
-  if (stageCanvas.width !== vw || stageCanvas.height !== vh) {
-    stageCanvas.width = vw;
-    stageCanvas.height = vh;
-    blurCanvas.width = vw;
-    blurCanvas.height = vh;
+  if (stageCanvas.width !== bufW || stageCanvas.height !== bufH) {
+    stageCanvas.width = bufW;
+    stageCanvas.height = bufH;
+    blurCanvas.width = bufW;
+    blurCanvas.height = bufH;
   }
 
   if (!clusterOverlayCanvas) {
@@ -492,14 +499,20 @@ function ensureStageBuffers() {
  */
 function captureViewportStage(neededBlur) {
   if (!ensureStageBuffers()) return;
-  const vw = stageCanvas.width;
-  const vh = stageCanvas.height;
+  const dpr = getDevicePixelRatio();
+  const bw = stageCanvas.width;
+  const bh = stageCanvas.height;
+  const vw = Math.round(bw / dpr);
+  const vh = Math.round(bh / dpr);
 
-  // 1. Base page background
-  stageCtx.fillStyle = '#040814';
-  stageCtx.fillRect(0, 0, vw, vh);
+  stageCtx.save();
 
-  // 2. Copy any background 2D canvas using its exact getBoundingClientRect() viewport box
+  // 1. Base page background (detect light/dark body background)
+  const bodyBg = typeof document !== 'undefined' ? window.getComputedStyle(document.body).backgroundColor : '';
+  stageCtx.fillStyle = bodyBg && bodyBg !== 'transparent' && bodyBg !== 'rgba(0, 0, 0, 0)' ? bodyBg : '#040814';
+  stageCtx.fillRect(0, 0, bw, bh);
+
+  // 2. Copy any background 2D canvas using physical buffer pixels
   const bgCanvases = document.querySelectorAll('canvas:not(.lg-lens-canvas):not(.lg-cluster-canvas)');
   for (let i = 0; i < bgCanvases.length; i++) {
     const c = bgCanvases[i];
@@ -507,13 +520,22 @@ function captureViewportStage(neededBlur) {
       try {
         const cr = c.getBoundingClientRect();
         if (cr.width > 0 && cr.height > 0) {
-          stageCtx.drawImage(c, cr.left, cr.top, cr.width, cr.height);
+          stageCtx.drawImage(
+            c,
+            Math.round(cr.left * dpr),
+            Math.round(cr.top * dpr),
+            Math.round(cr.width * dpr),
+            Math.round(cr.height * dpr)
+          );
         }
       } catch {
         // Ignore cross-origin canvas if any
       }
     }
   }
+
+  // Scale context for DOM elements rendered in CSS pixels
+  stageCtx.scale(dpr, dpr);
 
   // 3. Draw visible block surfaces (cards, buttons, pills, inputs) inside <main> and <footer>
   const surfaceEls = document.querySelectorAll(
@@ -668,11 +690,13 @@ function captureViewportStage(neededBlur) {
     stageCtx.restore();
   }
 
+  stageCtx.restore();
+
   // 5. Blur buffer for frosted glass
   if (neededBlur > 0) {
     lastFrostedRadius = neededBlur;
-    blurCtx.clearRect(0, 0, vw, vh);
-    blurCtx.filter = `blur(${neededBlur}px) saturate(135%)`;
+    blurCtx.clearRect(0, 0, bw, bh);
+    blurCtx.filter = `blur(${neededBlur * dpr}px) saturate(135%)`;
     blurCtx.drawImage(stageCanvas, 0, 0);
     blurCtx.filter = 'none';
   }
@@ -682,9 +706,10 @@ function captureViewportStage(neededBlur) {
  * Fast Isolated Lens Renderer (Takes ~0.12 ms using precomputed TypedArray LUT!)
  */
 function renderIsolatedController(ctrl, rect) {
-  const w = Math.max(16, Math.round(rect.width));
-  const h = Math.max(16, Math.round(rect.height));
-  const rad = ctrl._getRadius();
+  const dpr = getDevicePixelRatio();
+  const w = Math.max(16, Math.round(rect.width * dpr));
+  const h = Math.max(16, Math.round(rect.height * dpr));
+  const rad = ctrl._getRadius() * dpr;
 
   if (
     !ctrl._lut ||
@@ -692,7 +717,7 @@ function renderIsolatedController(ctrl, rect) {
     ctrl._lut.h !== h ||
     Math.abs(ctrl._lut.rad - Math.min(rad, w * 0.5, h * 0.5)) > 1.0
   ) {
-    ctrl._lut = buildElementLUT(w, h, rad, ctrl.options, 1);
+    ctrl._lut = buildElementLUT(w, h, rad, ctrl.options, dpr);
   }
 
   const lut = ctrl._lut;
@@ -701,9 +726,9 @@ function renderIsolatedController(ctrl, rect) {
     ctrl._canvas.height = h;
   }
 
-  // Use exact un-clamped element position so dragging near/past mobile viewport edges never shifts the image
-  const dx = Math.round(rect.left);
-  const dy = Math.round(rect.top);
+  // Use exact un-clamped element position in physical canvas pixels
+  const dx = Math.round(rect.left * dpr);
+  const dy = Math.round(rect.top * dpr);
 
   const sourceCtx = ctrl.options.frosted > 0 ? blurCtx : stageCtx;
   const srcImg = sourceCtx.getImageData(dx, dy, w, h);
@@ -889,6 +914,7 @@ function renderAllActiveLenses() {
         tint: ctrl._tint
       }));
 
+      const dpr = getDevicePixelRatio();
       const box = renderFusedCluster(
         clusterOverlayCtx,
         sourceCtx,
@@ -897,7 +923,7 @@ function renderAllActiveLenses() {
           ...primaryCtrl.options,
           fusionDistance: 64
         },
-        1
+        dpr
       );
 
       if (box && clusterOverlayCanvas) {
@@ -905,9 +931,9 @@ function renderAllActiveLenses() {
         clusterOverlayCanvas.style.filter = anyHasShadow
           ? 'drop-shadow(3px 14px 18px rgba(0, 0, 0, 0.16))'
           : 'none';
-        clusterOverlayCanvas.style.transform = `translate3d(${box.cMinX}px, ${box.cMinY}px, 0)`;
-        clusterOverlayCanvas.style.width = `${box.boxW}px`;
-        clusterOverlayCanvas.style.height = `${box.boxH}px`;
+        clusterOverlayCanvas.style.transform = `translate3d(${box.cMinX / dpr}px, ${box.cMinY / dpr}px, 0)`;
+        clusterOverlayCanvas.style.width = `${box.boxW / dpr}px`;
+        clusterOverlayCanvas.style.height = `${box.boxH / dpr}px`;
       }
     }
   }
