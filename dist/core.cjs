@@ -13,14 +13,16 @@ const OPTICAL_DEFAULTS = exports.OPTICAL_DEFAULTS = Object.freeze({
   ior: 1.46,
   height: 18,
   frosted: 0,
-  fusion: true
+  fusion: true,
+  dpr: 0
 });
 
 const OPTICAL_LIMITS = exports.OPTICAL_LIMITS = Object.freeze({
   rim: Object.freeze({ min: 4, max: 48 }),
   ior: Object.freeze({ min: 1.05, max: 2.20 }),
   height: Object.freeze({ min: 2, max: 50 }),
-  frosted: Object.freeze({ min: 0, max: 32 })
+  frosted: Object.freeze({ min: 0, max: 32 }),
+  dpr: Object.freeze({ min: 0.5, max: 3.0 })
 });
 
 function clampNumber(val, fallback, min, max) {
@@ -57,7 +59,11 @@ exports.normalizeOptions = function normalizeOptions(options = {}) {
       OPTICAL_LIMITS.frosted.min,
       OPTICAL_LIMITS.frosted.max
     ),
-    fusion: options.fusion !== undefined ? Boolean(options.fusion) : OPTICAL_DEFAULTS.fusion
+    fusion: options.fusion !== undefined ? Boolean(options.fusion) : OPTICAL_DEFAULTS.fusion,
+    dpr:
+      typeof options.dpr === 'number' && options.dpr > 0
+        ? clampNumber(options.dpr, 1, OPTICAL_LIMITS.dpr.min, OPTICAL_LIMITS.dpr.max)
+        : 0
   };
 }
 
@@ -477,8 +483,17 @@ function getReadableStrokeColor(borderCol, fallback = 'rgba(148, 163, 184, 0.55)
   return fallback;
 }
 
-function getDevicePixelRatio() {
-  return typeof window !== 'undefined' ? Math.min(window.devicePixelRatio || 1, 1.5) : 1;
+function getDevicePixelRatio(customDpr = 0, elementWidth = 0) {
+  if (typeof customDpr === 'number' && customDpr > 0) {
+    return Math.max(0.5, Math.min(3.0, customDpr));
+  }
+  if (typeof window === 'undefined') return 1;
+  const sysDpr = window.devicePixelRatio || 1;
+  // Automatically use 1.0 for wide elements (headers, banners >= 700px) to guarantee 120 FPS
+  if (elementWidth >= 700) {
+    return 1;
+  }
+  return Math.min(sysDpr, 1.5);
 }
 
 function ensureStageBuffers() {
@@ -721,25 +736,50 @@ function captureViewportStage(neededBlur) {
 
   stageCtx.restore();
 
+let supportsCanvasFilterBlur = null;
+function checkCanvasFilterBlur() {
+  if (supportsCanvasFilterBlur !== null) return supportsCanvasFilterBlur;
+  if (typeof document === 'undefined') return false;
+  try {
+    const testC = document.createElement('canvas');
+    testC.width = 4;
+    testC.height = 4;
+    const testCtx = testC.getContext('2d');
+    if (!testCtx || typeof testCtx.filter !== 'string') {
+      return (supportsCanvasFilterBlur = false);
+    }
+    testCtx.fillStyle = '#000';
+    testCtx.fillRect(0, 0, 4, 4);
+    testCtx.filter = 'blur(2px)';
+    testCtx.fillStyle = '#fff';
+    testCtx.fillRect(0, 0, 2, 2);
+    testCtx.filter = 'none';
+    const imgData = testCtx.getImageData(0, 0, 4, 4).data;
+    supportsCanvasFilterBlur = imgData[15 * 4] > 0 || imgData[14 * 4] > 0 || imgData[11 * 4] > 0;
+    return supportsCanvasFilterBlur;
+  } catch {
+    return (supportsCanvasFilterBlur = false);
+  }
+}
+
   // 5. Blur buffer for frosted glass (Robust across all mobile WebKit & Blink engines)
   if (neededBlur > 0) {
     lastFrostedRadius = neededBlur;
     blurCtx.clearRect(0, 0, bw, bh);
-    const filterStr = `blur(${Math.round(neededBlur * dpr)}px)`;
-    blurCtx.filter = filterStr;
-    blurCtx.drawImage(stageCanvas, 0, 0);
 
-    // Safari iOS fallback if CanvasRenderingContext2D.filter is unsupported or ignored
-    if (!blurCtx.filter || blurCtx.filter === 'none') {
-      const scale = Math.max(0.08, 1.0 / (1.0 + neededBlur * 0.45));
-      const sw = Math.max(4, Math.round(bw * scale));
-      const sh = Math.max(4, Math.round(bh * scale));
+    if (checkCanvasFilterBlur()) {
+      blurCtx.filter = `blur(${Math.round(neededBlur * dpr)}px)`;
+      blurCtx.drawImage(stageCanvas, 0, 0);
+      blurCtx.filter = 'none';
+    } else {
+      // Hardware-accelerated multi-step pyramid downscale/upscale blur for iOS Safari and mobile WebKit
+      const factor = Math.max(0.04, 1.0 / (1.0 + neededBlur * 0.45));
+      const pw = Math.max(4, Math.round(bw * factor));
+      const ph = Math.max(4, Math.round(bh * factor));
       blurCtx.imageSmoothingEnabled = true;
       blurCtx.imageSmoothingQuality = 'high';
-      blurCtx.drawImage(stageCanvas, 0, 0, sw, sh);
-      blurCtx.drawImage(blurCanvas, 0, 0, sw, sh, 0, 0, bw, bh);
-    } else {
-      blurCtx.filter = 'none';
+      blurCtx.drawImage(stageCanvas, 0, 0, pw, ph);
+      blurCtx.drawImage(blurCanvas, 0, 0, pw, ph, 0, 0, bw, bh);
     }
   }
 }
@@ -748,7 +788,7 @@ function captureViewportStage(neededBlur) {
  * Fast Isolated Lens Renderer (Takes ~0.12 ms using precomputed TypedArray LUT!)
  */
 function renderIsolatedController(ctrl, rect) {
-  const dpr = getDevicePixelRatio();
+  const dpr = getDevicePixelRatio(ctrl.options.dpr, rect.width);
   const w = Math.max(16, Math.round(rect.width * dpr));
   const h = Math.max(16, Math.round(rect.height * dpr));
   const rad = ctrl._getRadius();
@@ -946,10 +986,12 @@ function renderAllActiveLenses() {
         h: rect.height,
         borderRadius: ctrl._getRadius(),
         fusion: true,
-        tint: ctrl._tint
+        tint: ctrl._tint,
+        dpr: ctrl.options.dpr
       }));
 
-      const dpr = getDevicePixelRatio();
+      const maxClusterWidth = Math.max(...group.map(g => g.rect.width));
+      const dpr = getDevicePixelRatio(primaryCtrl.options.dpr, maxClusterWidth);
       const box = renderFusedCluster(
         clusterOverlayCtx,
         sourceCtx,
@@ -964,6 +1006,17 @@ function renderAllActiveLenses() {
       if (box && clusterOverlayCanvas) {
         clusterOverlayCanvas.style.display = 'block';
         clusterOverlayCanvas.style.filter = 'none';
+
+        // Match z-index to highest element in the cluster so it never pops above floating menus/controls
+        let maxZ = 20;
+        for (const item of group) {
+          if (item.ctrl && item.ctrl.element) {
+            const z = parseInt(window.getComputedStyle(item.ctrl.element).zIndex, 10);
+            if (!Number.isNaN(z) && z > maxZ) maxZ = z;
+          }
+        }
+        clusterOverlayCanvas.style.zIndex = String(maxZ);
+
         clusterOverlayCanvas.style.transform = `translate3d(${box.cMinX / dpr}px, ${box.cMinY / dpr}px, 0)`;
         clusterOverlayCanvas.style.width = `${box.boxW / dpr}px`;
         clusterOverlayCanvas.style.height = `${box.boxH / dpr}px`;
@@ -1136,11 +1189,11 @@ const LiquidGlassController = exports.LiquidGlassController = class LiquidGlassC
       changed = true;
     }
 
-    for (const key of ['rim', 'ior', 'height', 'frosted', 'fusion']) {
+    for (const key of ['rim', 'ior', 'height', 'frosted', 'fusion', 'dpr']) {
       if (merged[key] !== this.options[key]) {
         this.options[key] = merged[key];
         changed = true;
-        if (key === 'rim' || key === 'ior' || key === 'height') {
+        if (key === 'rim' || key === 'ior' || key === 'height' || key === 'dpr') {
           lutChanged = true;
         }
       }

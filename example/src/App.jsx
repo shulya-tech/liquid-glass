@@ -206,6 +206,7 @@ export default function App() {
   const [height, setHeight] = useState(OPTICAL_DEFAULTS.height);
   const [frosted, setFrosted] = useState(OPTICAL_DEFAULTS.frosted);
   const [fusion, setFusion] = useState(OPTICAL_DEFAULTS.fusion);
+  const [dpr, setDpr] = useState(0);
   const [fps, setFps] = useState(120);
 
   // 3 draggable glass bodies with top-left positioning
@@ -243,7 +244,7 @@ export default function App() {
 
   useLayoutEffect(() => {
     scheduleStageRedraw();
-  }, [shapes, rim, ior, height, frosted, fusion]);
+  }, [shapes, rim, ior, height, frosted, fusion, dpr]);
 
   // FPS monitor
   useEffect(() => {
@@ -324,6 +325,7 @@ export default function App() {
           height={height}
           frosted={frosted}
           fusion={fusion}
+          dpr={dpr}
           className="glass-body"
           data-lg-tint="rgba(255, 255, 255, 0.04)"
           onPointerDown={(e) => handlePointerDown(s.id, e)}
@@ -397,6 +399,21 @@ export default function App() {
             step="1"
             value={frosted}
             onChange={(e) => setFrosted(Number(e.target.value))}
+          />
+        </div>
+
+        <div className="ctrl">
+          <div className="ctrl-head">
+            <span>Resolution (DPR)</span>
+            <span className="ctrl-val">{dpr === 0 ? 'Auto' : `${dpr}x`}</span>
+          </div>
+          <input
+            type="range"
+            min="0"
+            max="2"
+            step="0.5"
+            value={dpr}
+            onChange={(e) => setDpr(Number(e.target.value))}
           />
         </div>
 

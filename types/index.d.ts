@@ -31,6 +31,12 @@ export interface LiquidGlassOptions {
   enabled?: boolean;
 
   /**
+   * Optional custom device pixel ratio override (e.g. 1.0 for full-width navbars to maximize FPS, or 1.5–2.0 for high-DPI retina sharpness).
+   * Defaults to 0 (automatic: 1.5 for compact UI elements, 1.0 for elements >= 700px wide).
+   */
+  dpr?: number;
+
+  /**
    * Optional border radius override in pixels
    */
   borderRadius?: number | null;
@@ -42,6 +48,7 @@ export declare const OPTICAL_DEFAULTS: Readonly<{
   height: 18;
   frosted: 0;
   fusion: true;
+  dpr: 0;
 }>;
 
 export declare const OPTICAL_LIMITS: Readonly<{
@@ -49,6 +56,7 @@ export declare const OPTICAL_LIMITS: Readonly<{
   ior: Readonly<{ min: 1.05; max: 2.2 }>;
   height: Readonly<{ min: 2; max: 50 }>;
   frosted: Readonly<{ min: 0; max: 32 }>;
+  dpr: Readonly<{ min: 0.5; max: 3.0 }>;
 }>;
 
 export declare function normalizeOptions(options?: LiquidGlassOptions): Required<LiquidGlassOptions>;
