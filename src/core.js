@@ -531,7 +531,7 @@ function isMobileDevice() {
   return false;
 }
 
-function getDevicePixelRatio(customDpr = 0, elementWidth = 0) {
+function getDevicePixelRatio(customDpr = 0) {
   if (typeof customDpr === 'number' && customDpr > 0) {
     return Math.max(0.5, Math.min(3.0, customDpr));
   }
@@ -544,16 +544,12 @@ function getDevicePixelRatio(customDpr = 0, elementWidth = 0) {
   }
 
   const sysDpr = window.devicePixelRatio || 1;
-  // Automatically use 1.0 for wide elements (headers, banners >= 700px) on desktop to guarantee 120 FPS
-  if (elementWidth >= 700) {
-    return 1;
-  }
   return Math.min(sysDpr, 1.5);
 }
 
-function ensureStageBuffers() {
+function ensureStageBuffers(customDpr = 0) {
   if (typeof document === 'undefined') return false;
-  const dpr = getDevicePixelRatio();
+  const dpr = getDevicePixelRatio(customDpr);
   const docEl = document.documentElement;
   const vw = Math.max(1, window.innerWidth, docEl ? docEl.clientWidth : 0);
   const vh = Math.max(1, window.innerHeight, docEl ? docEl.clientHeight : 0);
@@ -596,9 +592,9 @@ function ensureStageBuffers() {
  * Captures the live viewport background (background canvas + visible images & typography)
  * onto stageCanvas so isolated & fused lenses can refract live pixels in < 0.2ms
  */
-function captureViewportStage(neededBlur) {
-  if (!ensureStageBuffers()) return;
-  const dpr = getDevicePixelRatio();
+function captureViewportStage(neededBlur, customDpr = 0) {
+  if (!ensureStageBuffers(customDpr)) return;
+  const dpr = getDevicePixelRatio(customDpr);
   const bw = stageCanvas.width;
   const bh = stageCanvas.height;
   const vw = Math.round(bw / dpr);
@@ -843,7 +839,7 @@ function checkCanvasFilterBlur() {
  * Fast Isolated Lens Renderer (Takes ~0.12 ms using precomputed TypedArray LUT!)
  */
 function renderIsolatedController(ctrl, rect) {
-  const dpr = getDevicePixelRatio(ctrl.options.dpr, rect.width);
+  const dpr = getDevicePixelRatio(ctrl.options.dpr);
   const w = Math.max(16, Math.round(rect.width * dpr));
   const h = Math.max(16, Math.round(rect.height * dpr));
   const rad = ctrl._getRadius();
@@ -962,6 +958,7 @@ function renderAllActiveLenses() {
 
   const visible = [];
   let maxFrosted = 0;
+  let activeDpr = 0;
 
   for (const ctrl of controllerRegistry) {
     if (!ctrl._mounted || !ctrl.enabled || !ctrl.element) {
@@ -983,12 +980,15 @@ function renderAllActiveLenses() {
     if (ctrl.options.frosted > maxFrosted) {
       maxFrosted = ctrl.options.frosted;
     }
+    if (ctrl.options.dpr > 0 && activeDpr === 0) {
+      activeDpr = ctrl.options.dpr;
+    }
     visible.push({ ctrl, rect: r });
   }
 
   if (visible.length === 0) return;
 
-  captureViewportStage(maxFrosted);
+  captureViewportStage(maxFrosted, activeDpr);
 
   // Disjoint-set Island Clustering
   const n = visible.length;
@@ -1048,8 +1048,7 @@ function renderAllActiveLenses() {
         dpr: ctrl.options.dpr
       }));
 
-      const maxClusterWidth = Math.max(...group.map(g => g.rect.width));
-      const dpr = getDevicePixelRatio(primaryCtrl.options.dpr, maxClusterWidth);
+      const dpr = getDevicePixelRatio(primaryCtrl.options.dpr);
       const box = renderFusedCluster(
         clusterOverlayCtx,
         sourceCtx,
