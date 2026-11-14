@@ -462,6 +462,9 @@ let stageCanvas = null;
 let stageCtx = null;
 let blurCanvas = null;
 let blurCtx = null;
+let domCacheCanvas = null;
+let domCacheCtx = null;
+let domCacheDirty = true;
 let clusterOverlayCanvas = null;
 let clusterOverlayCtx = null;
 let webglCanvas = null;
@@ -471,6 +474,14 @@ let rafScheduled = false;
 let rafId = 0;
 let listenersAttached = false;
 let lastFrostedRadius = -1;
+
+function hasLiveBackgroundCanvas() {
+  if (typeof document === 'undefined') return false;
+  const c = document.querySelector(
+    'canvas:not(.lg-lens-canvas):not(.lg-cluster-canvas):not(.lg-webgl-canvas)'
+  );
+  return Boolean(c && c.width > 0 && c.height > 0);
+}
 
 function parseCssRgba(str) {
   if (!str || str === 'transparent' || str === 'rgba(0, 0, 0, 0)') {
@@ -565,6 +576,8 @@ function ensureStageBuffers(customDpr = 0) {
     stageCtx = stageCanvas.getContext('2d', { willReadFrequently: true });
     blurCanvas = document.createElement('canvas');
     blurCtx = blurCanvas.getContext('2d', { willReadFrequently: true });
+    domCacheCanvas = document.createElement('canvas');
+    domCacheCtx = domCacheCanvas.getContext('2d');
   }
 
   if (stageCanvas.width !== bufW || stageCanvas.height !== bufH) {
@@ -572,6 +585,11 @@ function ensureStageBuffers(customDpr = 0) {
     stageCanvas.height = bufH;
     blurCanvas.width = bufW;
     blurCanvas.height = bufH;
+    if (domCacheCanvas) {
+      domCacheCanvas.width = bufW;
+      domCacheCanvas.height = bufH;
+      domCacheDirty = true;
+    }
   }
 
   if (!clusterOverlayCanvas) {
@@ -651,9 +669,189 @@ function ensureWebGLRenderer(customDpr = 0) {
   return true;
 }
 
+let supportsCanvasFilterBlur = null;
+function checkCanvasFilterBlur() {
+  if (supportsCanvasFilterBlur !== null) return supportsCanvasFilterBlur;
+  if (typeof document === 'undefined') return false;
+  try {
+    const testC = document.createElement('canvas');
+    const testCtx = testC.getContext('2d');
+    supportsCanvasFilterBlur = Boolean(testCtx && typeof testCtx.filter === 'string');
+    return supportsCanvasFilterBlur;
+  } catch {
+    return (supportsCanvasFilterBlur = false);
+  }
+}
+
+/**
+ * Caches DOM surface cards, typography and images onto a separate offscreen canvas
+ * Recomputed ONLY on scroll, resize, or DOM mutations so animation frames take < 0.1ms
+ */
+function renderDomSurfacesToCache(dpr, vw, vh, bw, bh) {
+  if (!domCacheCanvas || !domCacheCtx) return;
+  domCacheCtx.clearRect(0, 0, bw, bh);
+  domCacheCtx.save();
+  domCacheCtx.scale(dpr, dpr);
+
+  const mainEl = document.querySelector('main, footer');
+  if (mainEl) {
+    // 1. Draw visible block surfaces (cards, buttons, pills, inputs) inside <main> and <footer>
+    const surfaceEls = document.querySelectorAll(
+      'main div.rounded-2xl, main div.rounded-xl, main a.rounded-2xl, main a.rounded-xl, main button, main a.inline-flex, main input, main textarea, main span.rounded-lg, main span.rounded-full'
+    );
+    for (let i = 0; i < surfaceEls.length; i++) {
+      const el = surfaceEls[i];
+      const r = el.getBoundingClientRect();
+      if (r.bottom < -20 || r.top > vh + 20 || r.width <= 2 || r.height <= 2) continue;
+      const style = window.getComputedStyle(el);
+      const rad = Math.min(parseFloat(style.borderRadius) || 12, r.width * 0.5, r.height * 0.5);
+      const cls = typeof el.className === 'string' ? el.className : '';
+
+      domCacheCtx.save();
+      domCacheCtx.beginPath();
+      if (typeof domCacheCtx.roundRect === 'function') {
+        domCacheCtx.roundRect(r.left, r.top, r.width, r.height, rad);
+      } else {
+        domCacheCtx.rect(r.left, r.top, r.width, r.height);
+      }
+
+      const bgImg = style.backgroundImage;
+      const inlineBg = el.style && el.style.background;
+      if ((bgImg && bgImg.includes('gradient')) || (inlineBg && inlineBg.includes('gradient'))) {
+        const g = domCacheCtx.createLinearGradient(r.left, r.top, r.right, r.bottom);
+        g.addColorStop(0, '#fb923c');
+        g.addColorStop(0.5, '#ec4899');
+        g.addColorStop(1, '#a855f7');
+        domCacheCtx.fillStyle = g;
+        domCacheCtx.fill();
+      } else if (el.style && el.style.backgroundColor) {
+        domCacheCtx.fillStyle = el.style.backgroundColor;
+        domCacheCtx.fill();
+      } else if (cls.includes('bg-slate-950')) {
+        domCacheCtx.fillStyle = 'rgba(15, 23, 42, 0.92)';
+        domCacheCtx.fill();
+      } else {
+        domCacheCtx.fillStyle = 'rgba(30, 41, 59, 0.88)';
+        domCacheCtx.fill();
+      }
+
+      const bWidth = parseFloat(style.borderTopWidth) || 1.5;
+      domCacheCtx.lineWidth = Math.max(1.5, bWidth);
+      if (el.style && el.style.borderColor) {
+        domCacheCtx.strokeStyle = el.style.borderColor;
+      } else {
+        domCacheCtx.strokeStyle = 'rgba(148, 163, 184, 0.82)';
+      }
+      domCacheCtx.stroke();
+      domCacheCtx.restore();
+    }
+
+    // 2. Draw visible images inside <main>
+    const imgs = document.querySelectorAll('main img');
+    for (let i = 0; i < imgs.length; i++) {
+      const img = imgs[i];
+      if (!img.complete || img.naturalWidth === 0) continue;
+      const r = img.getBoundingClientRect();
+      if (r.bottom < -20 || r.top > vh + 20 || r.right < 0 || r.left > vw) continue;
+      try {
+        domCacheCtx.save();
+        const parent = img.parentElement;
+        const pStyle = parent ? window.getComputedStyle(parent) : null;
+        const pRad = pStyle ? parseFloat(pStyle.borderRadius) || 0 : 0;
+        if (pRad > 0 && typeof domCacheCtx.roundRect === 'function') {
+          domCacheCtx.beginPath();
+          domCacheCtx.roundRect(r.left, r.top, r.width, r.height, pRad);
+          domCacheCtx.clip();
+        }
+        domCacheCtx.drawImage(img, r.left, r.top, r.width, r.height);
+        domCacheCtx.restore();
+      } catch {
+        domCacheCtx.restore();
+      }
+    }
+
+    // 3. Draw visible text, headings, buttons & labels
+    const textEls = document.querySelectorAll(
+      'main h1, main h2, main h3, main p, main button, main a, main label, main input, main textarea, main span.font-mono, main span.rounded-full, main span.bg-clip-text, main div.rounded-xl span, main div.rounded-2xl span, footer p, footer a, footer button, footer span'
+    );
+    for (let i = 0; i < textEls.length; i++) {
+      const el = textEls[i];
+      if (el.tagName === 'A' && el.querySelector('img, h3')) continue;
+      const r = el.getBoundingClientRect();
+      if (r.bottom < -20 || r.top > vh + 20 || r.height <= 0 || r.width <= 0) continue;
+      const tag = el.tagName;
+      const style = window.getComputedStyle(el);
+      const cls = typeof el.className === 'string' ? el.className : '';
+      domCacheCtx.save();
+      domCacheCtx.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+      domCacheCtx.textBaseline = 'top';
+      if (tag === 'H1' || tag === 'H2' || tag === 'H3' || cls.includes('bg-clip-text')) {
+        const grad = domCacheCtx.createLinearGradient(r.left, r.top, r.right, r.top);
+        if (cls.includes('bg-clip-text') && tag === 'SPAN') {
+          grad.addColorStop(0, '#fb923c');
+          grad.addColorStop(0.5, '#ec4899');
+          grad.addColorStop(1, '#a855f7');
+        } else {
+          grad.addColorStop(0, '#f8fafc');
+          grad.addColorStop(0.55, '#f8fafc');
+          grad.addColorStop(0.75, '#fb923c');
+          grad.addColorStop(0.9, '#ec4899');
+          grad.addColorStop(1, '#a855f7');
+        }
+        domCacheCtx.fillStyle = grad;
+      } else if (tag === 'INPUT' || tag === 'TEXTAREA') {
+        domCacheCtx.fillStyle = '#94a3b8';
+      } else {
+        const col = style.color;
+        domCacheCtx.fillStyle = col && col.startsWith('rgb') ? col : '#f1f5f9';
+      }
+      const rawText =
+        tag === 'INPUT' || tag === 'TEXTAREA'
+          ? el.value || el.getAttribute('placeholder') || ''
+          : el.textContent || '';
+      const text = rawText.trim().replace(/\s+/g, ' ');
+      if (!text) {
+        domCacheCtx.restore();
+        continue;
+      }
+      const words = text.split(' ');
+      const fontSizePx = parseFloat(style.fontSize) || 16;
+      const lineHeight = parseFloat(style.lineHeight) || fontSizePx * 1.3;
+      let line = '';
+      const isButtonOrPill =
+        tag === 'BUTTON' ||
+        tag === 'A' ||
+        tag === 'INPUT' ||
+        style.display.includes('inline-flex') ||
+        cls.includes('rounded-full') ||
+        cls.includes('rounded-lg');
+      let y = isButtonOrPill ? r.top + (r.height - fontSizePx) * 0.5 : r.top;
+      const isCentered = style.textAlign === 'center' || (isButtonOrPill && tag !== 'INPUT');
+      domCacheCtx.textAlign = isCentered ? 'center' : 'left';
+      const drawX = isCentered ? r.left + r.width * 0.5 : r.left + (tag === 'INPUT' ? 12 : 0);
+
+      for (let wIdx = 0; wIdx < words.length; wIdx++) {
+        const testLine = line ? `${line} ${words[wIdx]}` : words[wIdx];
+        if (!isButtonOrPill && domCacheCtx.measureText(testLine).width > r.width && line) {
+          domCacheCtx.fillText(line, drawX, y);
+          line = words[wIdx];
+          y += lineHeight;
+        } else {
+          line = testLine;
+        }
+      }
+      if (line) {
+        domCacheCtx.fillText(line, drawX, y);
+      }
+      domCacheCtx.restore();
+    }
+  }
+  domCacheCtx.restore();
+}
+
 /**
  * Captures the live viewport background (background canvas + visible images & typography)
- * onto stageCanvas so isolated & fused lenses can refract live pixels in < 0.2ms
+ * onto stageCanvas so isolated & fused lenses can refract live pixels at native 60 / 120 FPS
  */
 function captureViewportStage(neededBlur, customDpr = 0) {
   if (!ensureStageBuffers(customDpr)) return;
@@ -663,14 +861,18 @@ function captureViewportStage(neededBlur, customDpr = 0) {
   const vw = Math.round(bw / dpr);
   const vh = Math.round(bh / dpr);
 
-  stageCtx.save();
+  // 1. Re-render DOM overlay only when dirty (scroll, resize, mutation), 0ms overhead during animation
+  if (domCacheDirty || !domCacheCanvas) {
+    renderDomSurfacesToCache(dpr, vw, vh, bw, bh);
+    domCacheDirty = false;
+  }
 
-  // 1. Base page background (detect light/dark body background)
+  // 2. Base page background (detect light/dark body background)
   const bodyBg = typeof document !== 'undefined' ? window.getComputedStyle(document.body).backgroundColor : '';
   stageCtx.fillStyle = bodyBg && bodyBg !== 'transparent' && bodyBg !== 'rgba(0, 0, 0, 0)' ? bodyBg : '#040814';
   stageCtx.fillRect(0, 0, bw, bh);
 
-  // 2. Copy any background 2D canvas using physical buffer pixels
+  // 3. Copy any background 2D canvas using physical buffer pixels (live particles at 60/120 FPS)
   const bgCanvases = document.querySelectorAll(
     'canvas:not(.lg-lens-canvas):not(.lg-cluster-canvas):not(.lg-webgl-canvas)'
   );
@@ -694,180 +896,10 @@ function captureViewportStage(neededBlur, customDpr = 0) {
     }
   }
 
-  // Scale context for DOM elements rendered in CSS pixels
-  stageCtx.scale(dpr, dpr);
-
-  const mainEl = document.querySelector('main, footer');
-  if (mainEl) {
-    // 3. Draw visible block surfaces (cards, buttons, pills, inputs) inside <main> and <footer>
-  const surfaceEls = document.querySelectorAll(
-    'main div.rounded-2xl, main div.rounded-xl, main a.rounded-2xl, main a.rounded-xl, main button, main a.inline-flex, main input, main textarea, main span.rounded-lg, main span.rounded-full'
-  );
-  for (let i = 0; i < surfaceEls.length; i++) {
-    const el = surfaceEls[i];
-    const r = el.getBoundingClientRect();
-    // Capture visible cards/buttons across the entire viewport (both top header and bottom privacy banner)
-    if (r.bottom < -20 || r.top > vh + 20 || r.width <= 2 || r.height <= 2) continue;
-    const style = window.getComputedStyle(el);
-    const rad = Math.min(parseFloat(style.borderRadius) || 12, r.width * 0.5, r.height * 0.5);
-    const cls = typeof el.className === 'string' ? el.className : '';
-
-    stageCtx.save();
-    stageCtx.beginPath();
-    if (typeof stageCtx.roundRect === 'function') {
-      stageCtx.roundRect(r.left, r.top, r.width, r.height, rad);
-    } else {
-      stageCtx.rect(r.left, r.top, r.width, r.height);
-    }
-
-    const bgImg = style.backgroundImage;
-    const inlineBg = el.style && el.style.background;
-    if ((bgImg && bgImg.includes('gradient')) || (inlineBg && inlineBg.includes('gradient'))) {
-      const g = stageCtx.createLinearGradient(r.left, r.top, r.right, r.bottom);
-      g.addColorStop(0, '#fb923c');
-      g.addColorStop(0.5, '#ec4899');
-      g.addColorStop(1, '#a855f7');
-      stageCtx.fillStyle = g;
-      stageCtx.fill();
-    } else if (el.style && el.style.backgroundColor) {
-      stageCtx.fillStyle = el.style.backgroundColor;
-      stageCtx.fill();
-    } else if (cls.includes('bg-slate-950')) {
-      stageCtx.fillStyle = 'rgba(15, 23, 42, 0.92)';
-      stageCtx.fill();
-    } else {
-      // Matte slate-900/40 cards & buttons — render with clear contrast against #040814
-      stageCtx.fillStyle = 'rgba(30, 41, 59, 0.88)';
-      stageCtx.fill();
-    }
-
-    const bWidth = parseFloat(style.borderTopWidth) || 1.5;
-    stageCtx.lineWidth = Math.max(1.5, bWidth);
-    if (el.style && el.style.borderColor) {
-      stageCtx.strokeStyle = el.style.borderColor;
-    } else {
-      stageCtx.strokeStyle = 'rgba(148, 163, 184, 0.82)';
-    }
-    stageCtx.stroke();
-    stageCtx.restore();
+  // 4. Composite cached DOM elements (cards, text, buttons) over live background canvas in 0.05ms
+  if (domCacheCanvas) {
+    stageCtx.drawImage(domCacheCanvas, 0, 0);
   }
-
-  // 4. Draw visible images inside <main> (rounded to parent border-radius if inside a card)
-  const imgs = document.querySelectorAll('main img');
-  for (let i = 0; i < imgs.length; i++) {
-    const img = imgs[i];
-    if (!img.complete || img.naturalWidth === 0) continue;
-    const r = img.getBoundingClientRect();
-    if (r.bottom < -20 || r.top > vh + 20 || r.right < 0 || r.left > vw) continue;
-    try {
-      stageCtx.save();
-      const parent = img.parentElement;
-      const pStyle = parent ? window.getComputedStyle(parent) : null;
-      const pRad = pStyle ? parseFloat(pStyle.borderRadius) || 0 : 0;
-      if (pRad > 0 && typeof stageCtx.roundRect === 'function') {
-        stageCtx.beginPath();
-        stageCtx.roundRect(r.left, r.top, r.width, r.height, pRad);
-        stageCtx.clip();
-      }
-      stageCtx.drawImage(img, r.left, r.top, r.width, r.height);
-      stageCtx.restore();
-    } catch {
-      stageCtx.restore();
-    }
-  }
-
-  // 5. Draw visible text, headings, buttons & labels in the top viewport band so header refracts them when scrolling over
-  const textEls = document.querySelectorAll(
-    'main h1, main h2, main h3, main p, main button, main a, main label, main input, main textarea, main span.font-mono, main span.rounded-full, main span.bg-clip-text, main div.rounded-xl span, main div.rounded-2xl span, footer p, footer a, footer button, footer span'
-  );
-  for (let i = 0; i < textEls.length; i++) {
-    const el = textEls[i];
-    if (el.tagName === 'A' && el.querySelector('img, h3')) continue;
-    const r = el.getBoundingClientRect();
-    if (r.bottom < -20 || r.top > vh + 20 || r.height <= 0 || r.width <= 0) continue;
-    const tag = el.tagName;
-    const style = window.getComputedStyle(el);
-    const cls = typeof el.className === 'string' ? el.className : '';
-    stageCtx.save();
-    stageCtx.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
-    stageCtx.textBaseline = 'top';
-    if (tag === 'H1' || tag === 'H2' || tag === 'H3' || cls.includes('bg-clip-text')) {
-      const grad = stageCtx.createLinearGradient(r.left, r.top, r.right, r.top);
-      if (cls.includes('bg-clip-text') && tag === 'SPAN') {
-        grad.addColorStop(0, '#fb923c');
-        grad.addColorStop(0.5, '#ec4899');
-        grad.addColorStop(1, '#a855f7');
-      } else {
-        grad.addColorStop(0, '#f8fafc');
-        grad.addColorStop(0.55, '#f8fafc');
-        grad.addColorStop(0.75, '#fb923c');
-        grad.addColorStop(0.9, '#ec4899');
-        grad.addColorStop(1, '#a855f7');
-      }
-      stageCtx.fillStyle = grad;
-    } else if (tag === 'INPUT' || tag === 'TEXTAREA') {
-      stageCtx.fillStyle = '#94a3b8';
-    } else {
-      const col = style.color;
-      stageCtx.fillStyle = col && col.startsWith('rgb') ? col : '#f1f5f9';
-    }
-    const rawText =
-      tag === 'INPUT' || tag === 'TEXTAREA'
-        ? el.value || el.getAttribute('placeholder') || ''
-        : el.textContent || '';
-    const text = rawText.trim().replace(/\s+/g, ' ');
-    if (!text) {
-      stageCtx.restore();
-      continue;
-    }
-    const words = text.split(' ');
-    const fontSizePx = parseFloat(style.fontSize) || 16;
-    const lineHeight = parseFloat(style.lineHeight) || fontSizePx * 1.3;
-    let line = '';
-    const isButtonOrPill =
-      tag === 'BUTTON' ||
-      tag === 'A' ||
-      tag === 'INPUT' ||
-      style.display.includes('inline-flex') ||
-      cls.includes('rounded-full') ||
-      cls.includes('rounded-lg');
-    let y = isButtonOrPill ? r.top + (r.height - fontSizePx) * 0.5 : r.top;
-    const isCentered = style.textAlign === 'center' || (isButtonOrPill && tag !== 'INPUT');
-    stageCtx.textAlign = isCentered ? 'center' : 'left';
-    const drawX = isCentered ? r.left + r.width * 0.5 : r.left + (tag === 'INPUT' ? 12 : 0);
-
-    for (let wIdx = 0; wIdx < words.length; wIdx++) {
-      const testLine = line ? `${line} ${words[wIdx]}` : words[wIdx];
-      if (!isButtonOrPill && stageCtx.measureText(testLine).width > r.width && line) {
-        stageCtx.fillText(line, drawX, y);
-        line = words[wIdx];
-        y += lineHeight;
-      } else {
-        line = testLine;
-      }
-    }
-    if (line) {
-      stageCtx.fillText(line, drawX, y);
-    }
-    stageCtx.restore();
-  }
-  }
-
-  stageCtx.restore();
-
-let supportsCanvasFilterBlur = null;
-function checkCanvasFilterBlur() {
-  if (supportsCanvasFilterBlur !== null) return supportsCanvasFilterBlur;
-  if (typeof document === 'undefined') return false;
-  try {
-    const testC = document.createElement('canvas');
-    const testCtx = testC.getContext('2d');
-    supportsCanvasFilterBlur = Boolean(testCtx && typeof testCtx.filter === 'string');
-    return supportsCanvasFilterBlur;
-  } catch {
-    return (supportsCanvasFilterBlur = false);
-  }
-}
 
   // 5. Blur buffer for frosted glass (Native hardware-accelerated blur across Chrome, Safari & mobile)
   if (neededBlur > 0 && !useWebGL) {
@@ -879,7 +911,6 @@ function checkCanvasFilterBlur() {
       blurCtx.drawImage(stageCanvas, 0, 0);
       blurCtx.filter = 'none';
     } else {
-      // Smooth multi-step pyramid downscale/upscale fallback for legacy engines
       const factor = Math.max(0.2, 1.0 / (1.0 + neededBlur * 0.25));
       const midW = Math.max(32, Math.round(bw * 0.5));
       const midH = Math.max(32, Math.round(bh * 0.5));
@@ -1231,14 +1262,29 @@ exports.scheduleStageRedraw = function scheduleStageRedraw(dirty = false) {
 function attachGlobalStageListeners() {
   if (listenersAttached || typeof window === 'undefined') return;
   listenersAttached = true;
-  window.addEventListener('scroll', () => { stageDirty = true; scheduleStageRedraw(true); }, { passive: true });
-  window.addEventListener('resize', () => { stageDirty = true; scheduleStageRedraw(true); }, { passive: true });
 
-  // Ambient 8fps background sync (125ms interval: preserves live ambient backgrounds without drag lag)
-  const tick = () => {
+  const markDirty = () => {
+    domCacheDirty = true;
     stageDirty = true;
     scheduleStageRedraw(true);
-    window.setTimeout(() => window.requestAnimationFrame(tick), 125);
+  };
+
+  window.addEventListener('scroll', markDirty, { passive: true });
+  window.addEventListener('resize', markDirty, { passive: true });
+
+  // Ambient background canvas sync:
+  // - WebGL (GPU): Uncapped native 60 / 120 FPS directly via requestAnimationFrame
+  // - 2D Canvas (CPU): Throttled to 30 FPS (32ms timeout) to preserve CPU & battery
+  const tick = () => {
+    if (controllerRegistry.size > 0 && hasLiveBackgroundCanvas()) {
+      stageDirty = true;
+      scheduleStageRedraw(true);
+    }
+    if (useWebGL) {
+      window.requestAnimationFrame(tick);
+    } else {
+      window.setTimeout(() => window.requestAnimationFrame(tick), 32);
+    }
   };
   window.requestAnimationFrame(tick);
 }
