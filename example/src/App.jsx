@@ -176,6 +176,35 @@ function drawStageBackground(canvas) {
 }
 
 function createInitialShapes(w, h) {
+  const isMobile = w < 600;
+  if (isMobile) {
+    return [
+      {
+        id: 'slider',
+        x: Math.round(w * 0.5 - 80),
+        y: Math.round(h * 0.16),
+        w: 160,
+        h: 90,
+        r: 45
+      },
+      {
+        id: 'circle',
+        x: Math.round(w * 0.5 - 60),
+        y: Math.round(h * 0.36),
+        w: 120,
+        h: 120,
+        r: 60
+      },
+      {
+        id: 'rect',
+        x: Math.round(w * 0.5 - 95),
+        y: Math.round(h * 0.60),
+        w: 190,
+        h: 110,
+        r: 22
+      }
+    ];
+  }
   return [
     {
       id: 'slider',

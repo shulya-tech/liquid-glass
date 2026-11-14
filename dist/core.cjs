@@ -225,6 +225,12 @@ exports.buildOpticalMapURI = function buildOpticalMapURI(width, height, borderRa
  * Renders a cluster of touching LiquidGlass elements onto a 2D canvas context
  * using precomputed empirical tables (_T0.._T4) and O(1) distGrid gradients.
  */
+let clusterDistGrid = null;
+let clusterDistGridCap = 0;
+let clusterDstImg = null;
+let clusterDstImgW = 0;
+let clusterDstImgH = 0;
+
 exports.renderFusedCluster = function renderFusedCluster(ctx, sourceCtx, elements, rawOptions = {}, dpr = 1) {
   const options = normalizeOptions(rawOptions);
   const fusionSpan = options.fusion ? (rawOptions.fusionDistance ?? 36) * dpr : 0;
@@ -266,10 +272,22 @@ exports.renderFusedCluster = function renderFusedCluster(ctx, sourceCtx, element
     ctx.canvas.height = boxH;
   }
 
-  const dstImg = ctx.createImageData(boxW, boxH);
-  const dstData = dstImg.data;
+  const needCap = boxW * boxH;
+  if (!clusterDistGrid || clusterDistGridCap < needCap) {
+    clusterDistGridCap = Math.max(needCap, (clusterDistGridCap * 1.5) | 0);
+    clusterDistGrid = new Float32Array(clusterDistGridCap);
+  }
+  const distGrid = clusterDistGrid;
 
-  const distGrid = new Float32Array(boxW * boxH);
+  if (!clusterDstImg || clusterDstImgW !== boxW || clusterDstImgH !== boxH) {
+    clusterDstImg = ctx.createImageData(boxW, boxH);
+    clusterDstImgW = boxW;
+    clusterDstImgH = boxH;
+  }
+  const dstImg = clusterDstImg;
+  const dstData = dstImg.data;
+  new Uint32Array(dstData.buffer, 0, needCap).fill(0);
+
   const prep = elements.map((b) => {
     const halfW = b.w * 0.5 * dpr;
     const halfH = b.h * 0.5 * dpr;
@@ -311,11 +329,17 @@ exports.renderFusedCluster = function renderFusedCluster(ctx, sourceCtx, element
         const b = prep[i];
         let dShape;
         if (b.isCircle) {
-          dShape = Math.hypot(px - b.cx, py - b.cy) - b.halfW;
+          const dx = px - b.cx;
+          const dy = py - b.cy;
+          dShape = Math.sqrt(dx * dx + dy * dy) - b.halfW;
         } else {
           const qx = Math.abs(px - b.cx) - b.halfW + b.r;
           const qy = Math.abs(py - b.cy) - b.halfH + b.r;
-          dShape = Math.min(Math.max(qx, qy), 0.0) + Math.hypot(Math.max(qx, 0.0), Math.max(qy, 0.0)) - b.r;
+          const ox = qx > 0 ? qx : 0;
+          const oy = qy > 0 ? qy : 0;
+          const outDist = ox > 0 || oy > 0 ? Math.sqrt(ox * ox + oy * oy) : 0;
+          const inDist = qx < 0 && qy < 0 ? (qx > qy ? qx : qy) : 0;
+          dShape = inDist + outDist - b.r;
         }
 
         if (i === 0) {
@@ -367,9 +391,9 @@ exports.renderFusedCluster = function renderFusedCluster(ctx, sourceCtx, element
 
           const dx = distGrid[row + x + 1] - distGrid[row + x - 1];
           const dy = distGrid[(y + 1) * boxW + x] - distGrid[(y - 1) * boxW + x];
-          const len = Math.hypot(dx, dy) + 1e-6;
-          const gx = dx / len;
-          const gy = dy / len;
+          const invLen = 1.0 / (Math.sqrt(dx * dx + dy * dy) + 1e-6);
+          const gx = dx * invLen;
+          const gy = dy * invLen;
 
           const shift = gain * (ior - 1.0) * heightPx;
           offX = Math.round(-gx * shift);
@@ -491,12 +515,20 @@ function getReadableStrokeColor(borderCol, fallback = 'rgba(148, 163, 184, 0.55)
 
 function isMobileDevice() {
   if (typeof navigator === 'undefined') return false;
-  return (
-    /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ||
-    (typeof window !== 'undefined' &&
+  const ua = navigator.userAgent || '';
+  if (/Mobi|Android|iPhone|iPad|iPod|Mobile/i.test(ua)) return true;
+  if (typeof window !== 'undefined') {
+    if (typeof navigator.maxTouchPoints === 'number' && navigator.maxTouchPoints > 1) {
+      if (window.innerWidth <= 1024 || window.innerHeight <= 1024) return true;
+    }
+    if (
       window.matchMedia &&
-      (window.matchMedia('(pointer: coarse)').matches || window.matchMedia('(max-width: 768px)').matches))
-  );
+      (window.matchMedia('(pointer: coarse)').matches || window.matchMedia('(max-width: 820px)').matches)
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function getDevicePixelRatio(customDpr = 0, elementWidth = 0) {
@@ -840,7 +872,10 @@ function renderIsolatedController(ctrl, rect) {
   const srcImg = sourceCtx.getImageData(dx, dy, w, h);
   const srcData = srcImg.data;
 
-  const lensImg = ctrl._ctx.createImageData(w, h);
+  if (!ctrl._lensImg || ctrl._lensImg.width !== w || ctrl._lensImg.height !== h) {
+    ctrl._lensImg = ctrl._ctx.createImageData(w, h);
+  }
+  const lensImg = ctrl._lensImg;
   const lensData = lensImg.data;
 
   // Start with tinted interior copy
@@ -1058,9 +1093,7 @@ function renderAllActiveLenses() {
 
 exports.scheduleStageRedraw = function scheduleStageRedraw() {
   if (typeof window === 'undefined') return;
-  if (rafScheduled && rafId) {
-    window.cancelAnimationFrame(rafId);
-  }
+  if (rafScheduled) return;
   rafScheduled = true;
   rafId = window.requestAnimationFrame(renderAllActiveLenses);
 }
