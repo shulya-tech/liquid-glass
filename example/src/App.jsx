@@ -342,7 +342,7 @@ export default function App() {
       <div className="shelf-bar">
         <div className="ctrl">
           <div className="ctrl-head">
-            <span>Ширина фаски (Rim)</span>
+            <span>Bevel Rim</span>
             <span className="ctrl-val">{rim} px</span>
           </div>
           <input
@@ -357,7 +357,7 @@ export default function App() {
 
         <div className="ctrl">
           <div className="ctrl-head">
-            <span>Преломление K (IOR)</span>
+            <span>Refraction (IOR)</span>
             <span className="ctrl-val">{ior.toFixed(2)}</span>
           </div>
           <input
@@ -372,7 +372,7 @@ export default function App() {
 
         <div className="ctrl">
           <div className="ctrl-head">
-            <span>Толщина (Height)</span>
+            <span>Thickness (Height)</span>
             <span className="ctrl-val">{height} px</span>
           </div>
           <input
@@ -387,7 +387,7 @@ export default function App() {
 
         <div className="ctrl">
           <div className="ctrl-head">
-            <span>Матовость (Frosted)</span>
+            <span>Frosted Glass</span>
             <span className="ctrl-val">{frosted} px</span>
           </div>
           <input
@@ -406,7 +406,7 @@ export default function App() {
             checked={fusion}
             onChange={(e) => setFusion(e.target.checked)}
           />
-          <span>Слияние (Fusion)</span>
+          <span>Liquid Fusion</span>
         </label>
 
         <div className="fps-tag">{fps} FPS</div>

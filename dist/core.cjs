@@ -221,7 +221,7 @@ exports.buildOpticalMapURI = function buildOpticalMapURI(width, height, borderRa
  */
 exports.renderFusedCluster = function renderFusedCluster(ctx, sourceCtx, elements, rawOptions = {}, dpr = 1) {
   const options = normalizeOptions(rawOptions);
-  const fusionSpan = options.fusion ? (rawOptions.fusionDistance ?? 44) * dpr : 0;
+  const fusionSpan = options.fusion ? (rawOptions.fusionDistance ?? 24) * dpr : 0;
   const rimPx = Math.max(1, options.rim * dpr);
   const ior = options.ior;
   const heightPx = options.height * dpr;
@@ -259,19 +259,26 @@ exports.renderFusedCluster = function renderFusedCluster(ctx, sourceCtx, element
   const dstData = dstImg.data;
 
   const distGrid = new Float32Array(boxW * boxH);
-  const prep = elements.map((b) => ({
-    cx: (b.x + b.w * 0.5) * dpr,
-    cy: (b.y + b.h * 0.5) * dpr,
-    halfW: b.w * 0.5 * dpr,
-    halfH: b.h * 0.5 * dpr,
-    r: Math.min((b.borderRadius ?? 0) * dpr, b.w * 0.5 * dpr, b.h * 0.5 * dpr),
-    isCircle: b.shape === 'circle',
-    fusion: b.fusion !== undefined ? Boolean(b.fusion) : options.fusion,
-    tintR: b.tint ? b.tint[0] : 15,
-    tintG: b.tint ? b.tint[1] : 23,
-    tintB: b.tint ? b.tint[2] : 42,
-    tintA: b.tint ? b.tint[3] : 0.35
-  }));
+  const prep = elements.map((b) => {
+    const halfW = b.w * 0.5 * dpr;
+    const halfH = b.h * 0.5 * dpr;
+    const rad = (b.borderRadius ?? 0) * dpr;
+    const r = Math.min(rad, halfW, halfH);
+    const isCircle = b.shape === 'circle' || (Math.abs(halfW - halfH) < 1.0 && Math.abs(r - halfW) < 1.0);
+    return {
+      cx: (b.x + b.w * 0.5) * dpr,
+      cy: (b.y + b.h * 0.5) * dpr,
+      halfW,
+      halfH,
+      r,
+      isCircle,
+      fusion: b.fusion !== undefined ? Boolean(b.fusion) : options.fusion,
+      tintR: b.tint ? b.tint[0] : 15,
+      tintG: b.tint ? b.tint[1] : 23,
+      tintB: b.tint ? b.tint[2] : 42,
+      tintA: b.tint ? b.tint[3] : 0.35
+    };
+  });
 
   const primary = prep[0];
   const tR = primary.tintR;
@@ -279,8 +286,10 @@ exports.renderFusedCluster = function renderFusedCluster(ctx, sourceCtx, element
   const tB = primary.tintB;
   const tA = primary.tintA;
   const invTA = 1.0 - tA;
+  const span = fusionSpan;
+  const invSpan = span > 0.001 ? 1.0 / span : 0;
 
-  // Pass 1: Boundary evaluation across cluster bounding box
+  // Pass 1: Boundary evaluation across cluster bounding box (Inlined fast LUT math)
   for (let y = 0; y < boxH; y++) {
     const py = cMinY + y;
     const row = y * boxW;
@@ -289,22 +298,36 @@ exports.renderFusedCluster = function renderFusedCluster(ctx, sourceCtx, element
       let dCluster = Infinity;
       for (let i = 0; i < prep.length; i++) {
         const b = prep[i];
-        const dShape = b.isCircle
-          ? evalCircle(px - b.cx, py - b.cy, b.halfW)
-          : evalRoundedRect(px - b.cx, py - b.cy, b.halfW, b.halfH, b.r);
+        let dShape;
+        if (b.isCircle) {
+          dShape = Math.hypot(px - b.cx, py - b.cy) - b.halfW;
+        } else {
+          const qx = Math.abs(px - b.cx) - b.halfW + b.r;
+          const qy = Math.abs(py - b.cy) - b.halfH + b.r;
+          dShape = Math.min(Math.max(qx, qy), 0.0) + Math.hypot(Math.max(qx, 0.0), Math.max(qy, 0.0)) - b.r;
+        }
+
         if (i === 0) {
           dCluster = dShape;
-        } else if (b.fusion && fusionSpan > 0) {
-          dCluster = blendSurfaces(dCluster, dShape, fusionSpan);
-        } else {
-          dCluster = Math.min(dCluster, dShape);
+        } else if (b.fusion && span > 0.001) {
+          const diff = dCluster > dShape ? dCluster - dShape : dShape - dCluster;
+          if (diff < span) {
+            const pos = diff * invSpan * 255.0;
+            const pIdx = Math.min(254, pos | 0);
+            const wWeight = _T3[pIdx] + (_T3[pIdx + 1] - _T3[pIdx]) * (pos - pIdx);
+            dCluster = (dCluster < dShape ? dCluster : dShape) - wWeight * span;
+          } else if (dShape < dCluster) {
+            dCluster = dShape;
+          }
+        } else if (dShape < dCluster) {
+          dCluster = dShape;
         }
       }
       distGrid[row + x] = dCluster;
     }
   }
 
-  // Pass 2: O(1) lookup from distGrid + tabular chromatic shift (_T4)
+  // Pass 2: Fast vectorized lookup from distGrid + tabular chromatic shift (_T4)
   for (let y = 1; y < boxH - 1; y++) {
     const row = y * boxW;
     for (let x = 1; x < boxW - 1; x++) {
@@ -325,8 +348,11 @@ exports.renderFusedCluster = function renderFusedCluster(ctx, sourceCtx, element
         const innerDist = -d;
         if (innerDist < rimPx) {
           const u = innerDist / rimPx;
-          const gain = sampleTable(_T0, u);
-          disp = sampleTable(_T4, u);
+          const posU = u * 255.0;
+          const uIdx = Math.min(254, posU | 0);
+          const uFrac = posU - uIdx;
+          const gain = _T0[uIdx] + (_T0[uIdx + 1] - _T0[uIdx]) * uFrac;
+          disp = _T4[uIdx] + (_T4[uIdx + 1] - _T4[uIdx]) * uFrac;
 
           const dx = distGrid[row + x + 1] - distGrid[row + x - 1];
           const dy = distGrid[(y + 1) * boxW + x] - distGrid[(y - 1) * boxW + x];
@@ -339,7 +365,8 @@ exports.renderFusedCluster = function renderFusedCluster(ctx, sourceCtx, element
           offY = Math.round(-gy * shift);
 
           if (gy < -0.2) {
-            sheen = Math.round(sampleTable(_T2, u) * (-gy) * 0.78);
+            const sVal = _T2[uIdx] + (_T2[uIdx + 1] - _T2[uIdx]) * uFrac;
+            sheen = Math.round(sVal * (-gy) * 0.78);
           }
         } else {
           // Fast interior path: zero displacement inside flat region (-d >= rimPx)
@@ -354,7 +381,9 @@ exports.renderFusedCluster = function renderFusedCluster(ctx, sourceCtx, element
 
       const absD = Math.abs(d);
       if (absD < 3.0) {
-        glint = Math.round(sampleTable(_T1, absD * 0.33) * 0.65);
+        const posG = Math.min(254, absD * 0.33 * 255.0);
+        const gIdx = posG | 0;
+        glint = Math.round((_T1[gIdx] + (_T1[gIdx + 1] - _T1[gIdx]) * (posG - gIdx)) * 0.65);
       }
 
       const sxG = Math.max(0, Math.min(boxW - 1, x + offX));
@@ -449,7 +478,7 @@ function getReadableStrokeColor(borderCol, fallback = 'rgba(148, 163, 184, 0.55)
 }
 
 function getDevicePixelRatio() {
-  return typeof window !== 'undefined' ? Math.min(window.devicePixelRatio || 1, 2) : 1;
+  return typeof window !== 'undefined' ? Math.min(window.devicePixelRatio || 1, 1.5) : 1;
 }
 
 function ensureStageBuffers() {
@@ -692,13 +721,26 @@ function captureViewportStage(neededBlur) {
 
   stageCtx.restore();
 
-  // 5. Blur buffer for frosted glass
+  // 5. Blur buffer for frosted glass (Robust across all mobile WebKit & Blink engines)
   if (neededBlur > 0) {
     lastFrostedRadius = neededBlur;
     blurCtx.clearRect(0, 0, bw, bh);
-    blurCtx.filter = `blur(${neededBlur * dpr}px) saturate(135%)`;
+    const filterStr = `blur(${Math.round(neededBlur * dpr)}px)`;
+    blurCtx.filter = filterStr;
     blurCtx.drawImage(stageCanvas, 0, 0);
-    blurCtx.filter = 'none';
+
+    // Safari iOS fallback if CanvasRenderingContext2D.filter is unsupported or ignored
+    if (!blurCtx.filter || blurCtx.filter === 'none') {
+      const scale = Math.max(0.08, 1.0 / (1.0 + neededBlur * 0.45));
+      const sw = Math.max(4, Math.round(bw * scale));
+      const sh = Math.max(4, Math.round(bh * scale));
+      blurCtx.imageSmoothingEnabled = true;
+      blurCtx.imageSmoothingQuality = 'high';
+      blurCtx.drawImage(stageCanvas, 0, 0, sw, sh);
+      blurCtx.drawImage(blurCanvas, 0, 0, sw, sh, 0, 0, bw, bh);
+    } else {
+      blurCtx.filter = 'none';
+    }
   }
 }
 
@@ -709,13 +751,14 @@ function renderIsolatedController(ctrl, rect) {
   const dpr = getDevicePixelRatio();
   const w = Math.max(16, Math.round(rect.width * dpr));
   const h = Math.max(16, Math.round(rect.height * dpr));
-  const rad = ctrl._getRadius() * dpr;
+  const rad = ctrl._getRadius();
+  const radPx = Math.min(rad * dpr, w * 0.5, h * 0.5);
 
   if (
     !ctrl._lut ||
     ctrl._lut.w !== w ||
     ctrl._lut.h !== h ||
-    Math.abs(ctrl._lut.rad - Math.min(rad, w * 0.5, h * 0.5)) > 1.0
+    Math.abs(ctrl._lut.rad - radPx) > 1.0
   ) {
     ctrl._lut = buildElementLUT(w, h, rad, ctrl.options, dpr);
   }
@@ -798,7 +841,7 @@ function renderIsolatedController(ctrl, rect) {
   ctrl._canvas.style.opacity = '1';
 }
 
-function areRectsTouching(r1, r2, threshold = 42) {
+function areRectsTouching(r1, r2, threshold = 24) {
   const dx = Math.max(
     0,
     Math.abs(r1.left + r1.width * 0.5 - (r2.left + r2.width * 0.5)) -
@@ -868,7 +911,7 @@ function renderAllActiveLenses() {
     if (!visible[i].ctrl.options.fusion) continue;
     for (let j = i + 1; j < n; j++) {
       if (!visible[j].ctrl.options.fusion) continue;
-      if (areRectsTouching(visible[i].rect, visible[j].rect, 54)) {
+      if (areRectsTouching(visible[i].rect, visible[j].rect, 24)) {
         union(i, j);
       }
     }
@@ -886,21 +929,13 @@ function renderAllActiveLenses() {
   for (const group of clusters.values()) {
     if (group.length === 1) {
       const { ctrl, rect } = group[0];
-      if (ctrl._savedShadow && ctrl.element.style.boxShadow === 'none') {
-        ctrl.element.style.boxShadow = ctrl._savedInlineShadow || '';
-      }
       if (rect.bottom > 1 && rect.top < vh) {
         renderIsolatedController(ctrl, rect);
       }
     } else {
       hasFusedCluster = true;
-      let anyHasShadow = false;
       for (const item of group) {
         item.ctrl._canvas.style.opacity = '0';
-        if (item.ctrl._savedShadow) {
-          anyHasShadow = true;
-          item.ctrl.element.style.boxShadow = 'none';
-        }
       }
       const primaryCtrl = group[group.length - 1].ctrl;
       const sourceCtx = primaryCtrl.options.frosted > 0 ? blurCtx : stageCtx;
@@ -921,16 +956,14 @@ function renderAllActiveLenses() {
         elements,
         {
           ...primaryCtrl.options,
-          fusionDistance: 64
+          fusionDistance: 24
         },
         dpr
       );
 
       if (box && clusterOverlayCanvas) {
         clusterOverlayCanvas.style.display = 'block';
-        clusterOverlayCanvas.style.filter = anyHasShadow
-          ? 'drop-shadow(3px 14px 18px rgba(0, 0, 0, 0.16))'
-          : 'none';
+        clusterOverlayCanvas.style.filter = 'none';
         clusterOverlayCanvas.style.transform = `translate3d(${box.cMinX / dpr}px, ${box.cMinY / dpr}px, 0)`;
         clusterOverlayCanvas.style.width = `${box.boxW / dpr}px`;
         clusterOverlayCanvas.style.height = `${box.boxH / dpr}px`;
