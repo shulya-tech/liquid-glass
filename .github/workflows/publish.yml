@@ -1,0 +1,46 @@
+name: Publish to npmjs
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    name: Build & Publish to npm
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js (with OIDC Trusted Publishing)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Ensure latest npm CLI for OIDC support
+        run: npm install -g npm@latest
+
+      - name: Build package
+        run: npm run build
+
+      - name: Auto-bump patch version if current version already exists on npm
+        run: |
+          LOCAL_VER=$(node -p "require('./package.json').version")
+          EXISTING=$(npm view "@shulya/liquid-glass@$LOCAL_VER" version 2>/dev/null || echo "")
+          if [ -n "$EXISTING" ]; then
+            LATEST_VER=$(npm view @shulya/liquid-glass version 2>/dev/null || echo "$LOCAL_VER")
+            echo "Version $LOCAL_VER is already published (latest on npm is $LATEST_VER). Auto-incrementing patch..."
+            npm version "$LATEST_VER" --no-git-tag-version --allow-same-version
+            npm version patch --no-git-tag-version
+          else
+            echo "Publishing new version $LOCAL_VER..."
+          fi
+
+      - name: Publish to npmjs via OIDC Trusted Publisher
+        run: npm publish --provenance --access public

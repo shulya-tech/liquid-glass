@@ -399,6 +399,7 @@ let blurCtx = null;
 let clusterOverlayCanvas = null;
 let clusterOverlayCtx = null;
 let rafScheduled = false;
+let rafId = 0;
 let listenersAttached = false;
 let lastFrostedRadius = -1;
 
@@ -449,8 +450,9 @@ function getReadableStrokeColor(borderCol, fallback = 'rgba(148, 163, 184, 0.55)
 
 function ensureStageBuffers() {
   if (typeof document === 'undefined') return false;
-  const vw = Math.max(1, window.innerWidth);
-  const vh = Math.max(1, window.innerHeight);
+  const docEl = document.documentElement;
+  const vw = Math.max(1, window.innerWidth, docEl ? docEl.clientWidth : 0);
+  const vh = Math.max(1, window.innerHeight, docEl ? docEl.clientHeight : 0);
 
   if (!stageCanvas) {
     stageCanvas = document.createElement('canvas');
@@ -497,13 +499,16 @@ function captureViewportStage(neededBlur) {
   stageCtx.fillStyle = '#040814';
   stageCtx.fillRect(0, 0, vw, vh);
 
-  // 2. Copy any background 2D canvas
+  // 2. Copy any background 2D canvas using its exact getBoundingClientRect() viewport box
   const bgCanvases = document.querySelectorAll('canvas:not(.lg-lens-canvas):not(.lg-cluster-canvas)');
   for (let i = 0; i < bgCanvases.length; i++) {
     const c = bgCanvases[i];
     if (c.width > 0 && c.height > 0) {
       try {
-        stageCtx.drawImage(c, 0, 0, vw, vh);
+        const cr = c.getBoundingClientRect();
+        if (cr.width > 0 && cr.height > 0) {
+          stageCtx.drawImage(c, cr.left, cr.top, cr.width, cr.height);
+        }
       } catch {
         // Ignore cross-origin canvas if any
       }
@@ -696,10 +701,9 @@ function renderIsolatedController(ctrl, rect) {
     ctrl._canvas.height = h;
   }
 
-  const vw = stageCanvas.width;
-  const vh = stageCanvas.height;
-  const dx = Math.max(0, Math.min(vw - w, Math.round(rect.left)));
-  const dy = Math.max(0, Math.min(vh - h, Math.round(rect.top)));
+  // Use exact un-clamped element position so dragging near/past mobile viewport edges never shifts the image
+  const dx = Math.round(rect.left);
+  const dy = Math.round(rect.top);
 
   const sourceCtx = ctrl.options.frosted > 0 ? blurCtx : stageCtx;
   const srcImg = sourceCtx.getImageData(dx, dy, w, h);
@@ -914,9 +918,12 @@ function renderAllActiveLenses() {
 }
 
 exports.scheduleStageRedraw = function scheduleStageRedraw() {
-  if (rafScheduled || typeof window === 'undefined') return;
+  if (typeof window === 'undefined') return;
+  if (rafScheduled && rafId) {
+    window.cancelAnimationFrame(rafId);
+  }
   rafScheduled = true;
-  window.requestAnimationFrame(renderAllActiveLenses);
+  rafId = window.requestAnimationFrame(renderAllActiveLenses);
 }
 
 function attachGlobalStageListeners() {

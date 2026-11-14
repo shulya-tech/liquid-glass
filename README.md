@@ -10,6 +10,7 @@
 **`@shulya/liquid-glass`** is an ultra-lightweight, zero-WebGL optical glass rendering engine for modern web applications. Turn any HTML container, card, navigation bar, modal, or interactive widget into a realistic refractive **Liquid Glass** block with real-time control over **`rim`**, **`ior`**, **`height`**, **`frosted`**, and **`fusion`** parameters.
 
 - **Live Interactive Demo:** [https://liquid.shulya.tech](https://liquid.shulya.tech)
+- **NPM Package:** [https://www.npmjs.com/package/@shulya/liquid-glass](https://www.npmjs.com/package/@shulya/liquid-glass)
 - **GitHub Repository:** [https://github.com/shulya-tech/liquid-glass](https://github.com/shulya-tech/liquid-glass)
 
 ![Liquid Glass Interactive Playground](./screen.png)
@@ -327,6 +328,7 @@ To guarantee zero runtime trigonometric or shader overhead across mobile devices
 ## Links
 
 - **Live Demo:** [https://liquid.shulya.tech](https://liquid.shulya.tech)
+- **NPM Package:** [https://www.npmjs.com/package/@shulya/liquid-glass](https://www.npmjs.com/package/@shulya/liquid-glass)
 - **GitHub Repository:** [https://github.com/shulya-tech/liquid-glass](https://github.com/shulya-tech/liquid-glass)
 - **Issue Tracker:** [https://github.com/shulya-tech/liquid-glass/issues](https://github.com/shulya-tech/liquid-glass/issues)
 

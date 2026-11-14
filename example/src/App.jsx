@@ -1,4 +1,10 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useCallback
+} from 'react';
 import {
   LiquidGlass,
   OPTICAL_DEFAULTS,
@@ -6,20 +12,17 @@ import {
 } from '@shulya/liquid-glass/react';
 
 /**
- * Draws a crisp, high-DPI optical test stage onto the background canvas:
- * - Light architectural backdrop (#ebedf2) with fine 56px hairline grid
- * - Sleek green switch pill track (top-left)
- * - Thin diagonal rainbow gradient ribbon
- * - Compact electric blue card (right-center)
- * - Refined sunset radial sphere (bottom-left)
- * - Fine 8px optical stripe grating (bottom-right)
- * - Clean centered "Shulya" typography
+ * Draws a crisp, high-DPI optical test stage onto the background canvas
+ * using its exact rendered getBoundingClientRect() dimensions so desktop
+ * and mobile viewports always match 1:1 to the sub-pixel.
  */
 function drawStageBackground(canvas) {
   if (!canvas) return;
-  const w = window.innerWidth;
-  const h = window.innerHeight;
+  const rect = canvas.getBoundingClientRect();
+  const w = Math.max(1, Math.round(rect.width || window.innerWidth));
+  const h = Math.max(1, Math.round(rect.height || window.innerHeight));
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const isMobile = w < 640;
 
   canvas.width = Math.floor(w * dpr);
   canvas.height = Math.floor(h * dpr);
@@ -37,7 +40,7 @@ function drawStageBackground(canvas) {
   // Fine architectural hairline grid (56px step, 0.5px crisp stroke)
   ctx.strokeStyle = 'rgba(0, 0, 0, 0.035)';
   ctx.lineWidth = 0.5;
-  const step = 56;
+  const step = isMobile ? 44 : 56;
   ctx.beginPath();
   for (let x = 0; x < w; x += step) {
     ctx.moveTo(x + 0.5, 0);
@@ -50,10 +53,10 @@ function drawStageBackground(canvas) {
   ctx.stroke();
 
   // 2. Sleek Green Switch Track (Top-Left)
-  const pillX = w * 0.16;
-  const pillY = h * 0.22;
-  const pillW = 160;
-  const pillH = 26;
+  const pillX = isMobile ? w * 0.24 : w * 0.16;
+  const pillY = isMobile ? h * 0.18 : h * 0.22;
+  const pillW = isMobile ? 116 : 160;
+  const pillH = isMobile ? 20 : 26;
   ctx.save();
   ctx.beginPath();
   ctx.roundRect(pillX - pillW / 2, pillY - pillH / 2, pillW, pillH, pillH / 2);
@@ -63,10 +66,10 @@ function drawStageBackground(canvas) {
 
   // 3. Thin Diagonal Rainbow Gradient Ribbon
   ctx.save();
-  ctx.translate(w * 0.5, h * 0.51);
+  ctx.translate(w * 0.5, isMobile ? h * 0.44 : h * 0.51);
   ctx.rotate(-0.2);
-  const ribHalfLen = Math.min(w * 0.28, 310);
-  const ribThickness = 26;
+  const ribHalfLen = isMobile ? Math.min(w * 0.4, 150) : Math.min(w * 0.28, 310);
+  const ribThickness = isMobile ? 18 : 26;
   const ribGrad = ctx.createLinearGradient(-ribHalfLen, 0, ribHalfLen, 0);
   ribGrad.addColorStop(0.0, '#ff2d55');
   ribGrad.addColorStop(0.25, '#ff9500');
@@ -87,25 +90,25 @@ function drawStageBackground(canvas) {
 
   // 4. Refined Electric Blue Card (Right Center)
   ctx.save();
-  const cardX = w * 0.67;
-  const cardY = h * 0.24;
-  const cardW = 152;
-  const cardH = 88;
+  const cardW = isMobile ? 108 : 152;
+  const cardH = isMobile ? 64 : 88;
+  const cardX = isMobile ? w * 0.74 - cardW * 0.5 : w * 0.67;
+  const cardY = isMobile ? h * 0.17 : h * 0.24;
   const blueGrad = ctx.createLinearGradient(cardX, cardY, cardX + cardW, cardY + cardH);
   blueGrad.addColorStop(0, '#007aff');
   blueGrad.addColorStop(1, '#5856d6');
   ctx.fillStyle = blueGrad;
   ctx.beginPath();
-  ctx.roundRect(cardX, cardY, cardW, cardH, 22);
+  ctx.roundRect(cardX, cardY, cardW, cardH, isMobile ? 16 : 22);
   ctx.fill();
   ctx.restore();
 
   // 5. Compact Sunset Orange Sphere (Bottom Left)
   ctx.save();
-  const orbX = w * 0.26;
-  const orbY = h * 0.67;
-  const orbR = 54;
-  const orbGrad = ctx.createRadialGradient(orbX - 14, orbY - 14, 6, orbX, orbY, orbR);
+  const orbX = isMobile ? w * 0.25 : w * 0.26;
+  const orbY = isMobile ? h * 0.60 : h * 0.67;
+  const orbR = isMobile ? 38 : 54;
+  const orbGrad = ctx.createRadialGradient(orbX - 10, orbY - 10, 4, orbX, orbY, orbR);
   orbGrad.addColorStop(0, '#ffcc00');
   orbGrad.addColorStop(0.6, '#ff3b30');
   orbGrad.addColorStop(1, '#c91f66');
@@ -115,15 +118,15 @@ function drawStageBackground(canvas) {
   ctx.fill();
   ctx.restore();
 
-  // 6. Fine Optical Stripe Grating (Bottom Right — 10px stripes for refraction testing)
+  // 6. Fine Optical Stripe Grating (Bottom Right)
   ctx.save();
-  const stX = w * 0.63;
-  const stY = h * 0.62;
-  const stW = 160;
-  const stH = 92;
-  const stripeWidth = 10;
+  const stW = isMobile ? 112 : 160;
+  const stH = isMobile ? 68 : 92;
+  const stX = isMobile ? w * 0.72 - stW * 0.5 : w * 0.63;
+  const stY = isMobile ? h * 0.56 : h * 0.62;
+  const stripeWidth = isMobile ? 8 : 10;
   ctx.beginPath();
-  ctx.roundRect(stX, stY, stW, stH, 18);
+  ctx.roundRect(stX, stY, stW, stH, isMobile ? 14 : 18);
   ctx.clip();
   for (let i = 0; i < stW / stripeWidth; i++) {
     ctx.fillStyle = i % 2 === 0 ? '#1c1c1e' : '#ffffff';
@@ -133,15 +136,31 @@ function drawStageBackground(canvas) {
 
   // 7. Sleek Center Typography ("Shulya")
   ctx.save();
-  const fontSize = Math.min(w * 0.082, 92);
+  const fontSize = isMobile ? Math.min(w * 0.13, 52) : Math.min(w * 0.082, 92);
   ctx.font = `600 ${fontSize}px -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", sans-serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillStyle = '#16181d';
-  ctx.fillText('Shulya', w * 0.5, h * 0.43);
+  ctx.fillText('Shulya', w * 0.5, isMobile ? h * 0.38 : h * 0.43);
   ctx.restore();
 
   ctx.restore();
+}
+
+function createInitialShapes(w, h) {
+  const isMobile = w < 640;
+  if (isMobile) {
+    return [
+      { id: 'slider', x: w * 0.26, y: h * 0.18, w: 104, h: 58, r: 29 },
+      { id: 'rect', x: w * 0.74, y: h * 0.21, w: 132, h: 82, r: 18 },
+      { id: 'circle', x: w * 0.26, y: h * 0.60, w: 88, h: 88, r: 44 }
+    ];
+  }
+  return [
+    { id: 'slider', x: w * 0.16 + 42, y: h * 0.22, w: 136, h: 74, r: 37 },
+    { id: 'rect', x: w * 0.71, y: h * 0.21, w: 196, h: 116, r: 22 },
+    { id: 'circle', x: w * 0.22, y: h * 0.65, w: 112, h: 112, r: 56 }
+  ];
 }
 
 export default function App() {
@@ -159,28 +178,53 @@ export default function App() {
   const [shapes, setShapes] = useState(() => {
     const w = typeof window !== 'undefined' ? window.innerWidth : 1280;
     const h = typeof window !== 'undefined' ? window.innerHeight : 800;
-    return [
-      { id: 'slider', x: w * 0.16 + 42, y: h * 0.22, w: 136, h: 74, r: 37 },
-      { id: 'rect', x: w * 0.71, y: h * 0.21, w: 196, h: 116, r: 22 },
-      { id: 'circle', x: w * 0.22, y: h * 0.65, w: 112, h: 112, r: 56 }
-    ];
+    return createInitialShapes(w, h);
   });
 
   const dragState = useRef(null);
+  const lastModeRef = useRef(
+    typeof window !== 'undefined' ? window.innerWidth < 640 : false
+  );
 
-  // Draw stage canvas and handle window resize
-  useEffect(() => {
-    drawStageBackground(stageRef.current);
-    scheduleStageRedraw();
+  // Synchronously redraw stage background before browser paint and on resize
+  useLayoutEffect(() => {
+    const canvas = stageRef.current;
+    if (!canvas) return;
 
-    const handleResize = () => {
-      drawStageBackground(stageRef.current);
+    const syncStage = () => {
+      const rect = canvas.getBoundingClientRect();
+      const w = Math.max(1, Math.round(rect.width || window.innerWidth));
+      const h = Math.max(1, Math.round(rect.height || window.innerHeight));
+      const isMobile = w < 640;
+
+      if (isMobile !== lastModeRef.current) {
+        lastModeRef.current = isMobile;
+        setShapes(createInitialShapes(w, h));
+      }
+
+      drawStageBackground(canvas);
       scheduleStageRedraw();
     };
 
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
+    syncStage();
+
+    let ro = null;
+    if (typeof ResizeObserver !== 'undefined') {
+      ro = new ResizeObserver(syncStage);
+      ro.observe(canvas);
+    }
+    window.addEventListener('resize', syncStage);
+
+    return () => {
+      if (ro) ro.disconnect();
+      window.removeEventListener('resize', syncStage);
+    };
   }, []);
+
+  // Trigger optical redraw synchronously after React commits new shape positions or parameters
+  useLayoutEffect(() => {
+    scheduleStageRedraw();
+  }, [shapes, rim, ior, height, frosted, fusion]);
 
   // FPS monitor
   useEffect(() => {
@@ -232,7 +276,6 @@ export default function App() {
       setShapes((prev) =>
         prev.map((s) => (s.id === id ? { ...s, x: nextX, y: nextY } : s))
       );
-      scheduleStageRedraw();
     };
 
     const handlePointerUp = () => {
@@ -241,9 +284,11 @@ export default function App() {
 
     window.addEventListener('pointermove', handlePointerMove);
     window.addEventListener('pointerup', handlePointerUp);
+    window.addEventListener('pointercancel', handlePointerUp);
     return () => {
       window.removeEventListener('pointermove', handlePointerMove);
       window.removeEventListener('pointerup', handlePointerUp);
+      window.removeEventListener('pointercancel', handlePointerUp);
     };
   }, []);
 

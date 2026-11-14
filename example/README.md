@@ -1,6 +1,7 @@
 # `@shulya/liquid-glass` — React Interactive Playground (`example/`)
 
 - **Live Demo:** [https://liquid.shulya.tech](https://liquid.shulya.tech)
+- **NPM Package:** [https://www.npmjs.com/package/@shulya/liquid-glass](https://www.npmjs.com/package/@shulya/liquid-glass)
 - **GitHub Repository:** [https://github.com/shulya-tech/liquid-glass](https://github.com/shulya-tech/liquid-glass)
 
 ![Liquid Glass React Playground](../screen.png)
