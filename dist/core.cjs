@@ -227,7 +227,7 @@ exports.buildOpticalMapURI = function buildOpticalMapURI(width, height, borderRa
  */
 exports.renderFusedCluster = function renderFusedCluster(ctx, sourceCtx, elements, rawOptions = {}, dpr = 1) {
   const options = normalizeOptions(rawOptions);
-  const fusionSpan = options.fusion ? (rawOptions.fusionDistance ?? 24) * dpr : 0;
+  const fusionSpan = options.fusion ? (rawOptions.fusionDistance ?? 36) * dpr : 0;
   const rimPx = Math.max(1, options.rim * dpr);
   const ior = options.ior;
   const heightPx = options.height * dpr;
@@ -238,16 +238,21 @@ exports.renderFusedCluster = function renderFusedCluster(ctx, sourceCtx, element
     maxY = -Infinity;
 
   for (const el of elements) {
-    minX = Math.min(minX, (el.x - 16) * dpr);
-    minY = Math.min(minY, (el.y - 16) * dpr);
-    maxX = Math.max(maxX, (el.x + el.w + 16) * dpr);
-    maxY = Math.max(maxY, (el.y + el.h + 16) * dpr);
+    minX = Math.min(minX, el.x - 16);
+    minY = Math.min(minY, el.y - 16);
+    maxX = Math.max(maxX, el.x + el.w + 16);
+    maxY = Math.max(maxY, el.y + el.h + 16);
   }
 
-  const cMinX = Math.max(0, Math.floor(minX));
-  const cMinY = Math.max(0, Math.floor(minY));
-  const cMaxX = Math.min(sourceCtx.canvas.width, Math.ceil(maxX));
-  const cMaxY = Math.min(sourceCtx.canvas.height, Math.ceil(maxY));
+  const cssMinX = Math.max(0, Math.floor(minX));
+  const cssMinY = Math.max(0, Math.floor(minY));
+  const cssMaxX = Math.ceil(maxX);
+  const cssMaxY = Math.ceil(maxY);
+
+  const cMinX = Math.round(cssMinX * dpr);
+  const cMinY = Math.round(cssMinY * dpr);
+  const cMaxX = Math.min(sourceCtx.canvas.width, Math.round(cssMaxX * dpr));
+  const cMaxY = Math.min(sourceCtx.canvas.height, Math.round(cssMaxY * dpr));
 
   const boxW = cMaxX - cMinX;
   const boxH = cMaxY - cMinY;
@@ -346,8 +351,8 @@ exports.renderFusedCluster = function renderFusedCluster(ctx, sourceCtx, element
 
       let offX = 0,
         offY = 0,
-        glint = 0,
-        sheen = 0,
+        topSheenVal = 0,
+        glintVal = 0,
         disp = 0;
 
       if (d < 0) {
@@ -372,7 +377,7 @@ exports.renderFusedCluster = function renderFusedCluster(ctx, sourceCtx, element
 
           if (gy < -0.2) {
             const sVal = _T2[uIdx] + (_T2[uIdx + 1] - _T2[uIdx]) * uFrac;
-            sheen = Math.round(sVal * (-gy) * 0.78);
+            topSheenVal = Math.round(sVal * (-gy));
           }
         } else {
           // Fast interior path: zero displacement inside flat region (-d >= rimPx)
@@ -389,7 +394,7 @@ exports.renderFusedCluster = function renderFusedCluster(ctx, sourceCtx, element
       if (absD < 3.0) {
         const posG = Math.min(254, absD * 0.33 * 255.0);
         const gIdx = posG | 0;
-        glint = Math.round((_T1[gIdx] + (_T1[gIdx + 1] - _T1[gIdx]) * (posG - gIdx)) * 0.65);
+        glintVal = Math.round(_T1[gIdx] + (_T1[gIdx + 1] - _T1[gIdx]) * (posG - gIdx));
       }
 
       const sxG = Math.max(0, Math.min(boxW - 1, x + offX));
@@ -403,23 +408,24 @@ exports.renderFusedCluster = function renderFusedCluster(ctx, sourceCtx, element
       const gBg = srcData[(syG * boxW + sxG) * 4 + 1];
       const bBg = srcData[(syB * boxW + sxB) * 4 + 2];
 
-      const totalLum = sheen + glint;
       const pIdx = idx * 4;
       if (tA < 0.15) {
-        dstData[pIdx] = Math.min(255, Math.round(rBg * invTA + tR * tA + totalLum));
-        dstData[pIdx + 1] = Math.min(255, Math.round(gBg * invTA + tG * tA + totalLum));
-        dstData[pIdx + 2] = Math.min(255, Math.round(bBg * invTA + tB * tA + totalLum));
+        const clearSheen = topSheenVal * 0.92 + glintVal * 0.88;
+        dstData[pIdx] = Math.min(255, Math.round(rBg * invTA + tR * tA + clearSheen));
+        dstData[pIdx + 1] = Math.min(255, Math.round(gBg * invTA + tG * tA + clearSheen));
+        dstData[pIdx + 2] = Math.min(255, Math.round(bBg * invTA + tB * tA + clearSheen));
       } else {
-        dstData[pIdx] = Math.min(255, Math.round(rBg * invTA + tR * tA + totalLum * 0.72));
-        dstData[pIdx + 1] = Math.min(255, Math.round(gBg * invTA + tG * tA + totalLum * 0.88));
-        dstData[pIdx + 2] = Math.min(255, Math.round(bBg * invTA + tB * tA + totalLum));
+        const sheen = topSheenVal * 0.78 + glintVal * 0.65;
+        dstData[pIdx] = Math.min(255, Math.round(rBg * invTA + tR * tA + sheen * 0.72));
+        dstData[pIdx + 1] = Math.min(255, Math.round(gBg * invTA + tG * tA + sheen * 0.88));
+        dstData[pIdx + 2] = Math.min(255, Math.round(bBg * invTA + tB * tA + sheen));
       }
       dstData[pIdx + 3] = Math.round(edgeAlpha * 255);
     }
   }
 
   ctx.putImageData(dstImg, 0, 0);
-  return { cMinX, cMinY, boxW, boxH };
+  return { cMinX, cMinY, boxW, boxH, cssMinX, cssMinY, cssW: cssMaxX - cssMinX, cssH: cssMaxY - cssMinY };
 }
 
 // ============================================================================
@@ -483,13 +489,30 @@ function getReadableStrokeColor(borderCol, fallback = 'rgba(148, 163, 184, 0.55)
   return fallback;
 }
 
+function isMobileDevice() {
+  if (typeof navigator === 'undefined') return false;
+  return (
+    /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ||
+    (typeof window !== 'undefined' &&
+      window.matchMedia &&
+      (window.matchMedia('(pointer: coarse)').matches || window.matchMedia('(max-width: 768px)').matches))
+  );
+}
+
 function getDevicePixelRatio(customDpr = 0, elementWidth = 0) {
   if (typeof customDpr === 'number' && customDpr > 0) {
     return Math.max(0.5, Math.min(3.0, customDpr));
   }
   if (typeof window === 'undefined') return 1;
+
+  // On mobile devices & tablets, lock DPR to 1.0.
+  // Phone screens already have ultra-dense 400+ PPI physical pixels; 1.0 eliminates GPU memory bus throttling and gives instant 120 FPS
+  if (isMobileDevice()) {
+    return 1;
+  }
+
   const sysDpr = window.devicePixelRatio || 1;
-  // Automatically use 1.0 for wide elements (headers, banners >= 700px) to guarantee 120 FPS
+  // Automatically use 1.0 for wide elements (headers, banners >= 700px) on desktop to guarantee 120 FPS
   if (elementWidth >= 700) {
     return 1;
   }
@@ -881,7 +904,7 @@ function renderIsolatedController(ctrl, rect) {
   ctrl._canvas.style.opacity = '1';
 }
 
-function areRectsTouching(r1, r2, threshold = 24) {
+function areRectsTouching(r1, r2, threshold = 34) {
   const dx = Math.max(
     0,
     Math.abs(r1.left + r1.width * 0.5 - (r2.left + r2.width * 0.5)) -
@@ -951,7 +974,7 @@ function renderAllActiveLenses() {
     if (!visible[i].ctrl.options.fusion) continue;
     for (let j = i + 1; j < n; j++) {
       if (!visible[j].ctrl.options.fusion) continue;
-      if (areRectsTouching(visible[i].rect, visible[j].rect, 24)) {
+      if (areRectsTouching(visible[i].rect, visible[j].rect, 34)) {
         union(i, j);
       }
     }
@@ -998,7 +1021,7 @@ function renderAllActiveLenses() {
         elements,
         {
           ...primaryCtrl.options,
-          fusionDistance: 24
+          fusionDistance: 36
         },
         dpr
       );
@@ -1007,25 +1030,23 @@ function renderAllActiveLenses() {
         clusterOverlayCanvas.style.display = 'block';
         clusterOverlayCanvas.style.filter = 'none';
 
-        // Keep cluster overlay in the same parent container and stacking context as the glass bodies
-        const targetParent = (primaryCtrl.element && primaryCtrl.element.parentElement) || document.body;
-        if (clusterOverlayCanvas.parentElement !== targetParent) {
-          targetParent.appendChild(clusterOverlayCanvas);
+        if (clusterOverlayCanvas.parentElement !== document.body) {
+          document.body.appendChild(clusterOverlayCanvas);
         }
 
-        // Match z-index to lowest element in the cluster so it never pops above floating menus/controls
-        let clusterZ = 20;
+        // Match z-index to highest element in the cluster so it cleanly covers individual elements
+        let maxZ = 20;
         for (const item of group) {
           if (item.ctrl && item.ctrl.element) {
             const z = parseInt(window.getComputedStyle(item.ctrl.element).zIndex, 10);
-            if (!Number.isNaN(z)) clusterZ = Math.min(clusterZ, z);
+            if (!Number.isNaN(z) && z > maxZ) maxZ = z;
           }
         }
-        clusterOverlayCanvas.style.zIndex = String(clusterZ);
+        clusterOverlayCanvas.style.zIndex = String(maxZ);
 
-        clusterOverlayCanvas.style.transform = `translate3d(${box.cMinX / dpr}px, ${box.cMinY / dpr}px, 0)`;
-        clusterOverlayCanvas.style.width = `${box.boxW / dpr}px`;
-        clusterOverlayCanvas.style.height = `${box.boxH / dpr}px`;
+        clusterOverlayCanvas.style.transform = `translate3d(${box.cssMinX}px, ${box.cssMinY}px, 0)`;
+        clusterOverlayCanvas.style.width = `${box.cssW}px`;
+        clusterOverlayCanvas.style.height = `${box.cssH}px`;
       }
     }
   }
@@ -1074,8 +1095,6 @@ const LiquidGlassController = exports.LiquidGlassController = class LiquidGlassC
     this._ro = null;
     this._tint = [15, 23, 42, 0.35];
     this._savedBg = '';
-    this._savedShadow = '';
-    this._savedInlineShadow = '';
     this._mounted = false;
     this._init();
   }
@@ -1098,10 +1117,6 @@ const LiquidGlassController = exports.LiquidGlassController = class LiquidGlassC
     this._savedBg = attrTint || this.element.style.backgroundColor || computed.backgroundColor;
     this._tint = parseCssRgba(this._savedBg);
     this.element.style.backgroundColor = 'transparent';
-    if (computed.boxShadow && computed.boxShadow !== 'none') {
-      this._savedInlineShadow = this.element.style.boxShadow || '';
-      this._savedShadow = computed.boxShadow;
-    }
 
     const canvas = document.createElement('canvas');
     canvas.className = 'lg-lens-canvas';

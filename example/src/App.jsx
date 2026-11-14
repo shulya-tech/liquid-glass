@@ -26,7 +26,14 @@ function drawStageBackground(canvas) {
   const rect = canvas.getBoundingClientRect();
   const w = Math.max(1, Math.round(rect.width || window.innerWidth));
   const h = Math.max(1, Math.round(rect.height || window.innerHeight));
-  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const isMobileScreen =
+    typeof navigator !== 'undefined' &&
+    (/Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ||
+      (typeof window !== 'undefined' &&
+        window.matchMedia &&
+        (window.matchMedia('(pointer: coarse)').matches ||
+          window.matchMedia('(max-width: 768px)').matches)));
+  const dpr = isMobileScreen ? 1 : Math.min(window.devicePixelRatio || 1, 1.5);
 
   canvas.width = Math.floor(w * dpr);
   canvas.height = Math.floor(h * dpr);
