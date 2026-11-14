@@ -1,0 +1,117 @@
+{
+  "name": "@shulya/liquid-glass",
+  "version": "1.0.0",
+  "description": "High-performance, zero-WebGL Liquid Glass optical UI engine with pre-computed empirical lookup tables for React, Vue, Svelte, Angular, SolidJS, and Vanilla JS.",
+  "author": "Shulya (https://shulya.tech)",
+  "homepage": "https://liquid.shulya.tech",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shulya-tech/liquid-glass.git"
+  },
+  "bugs": {
+    "url": "https://github.com/shulya-tech/liquid-glass/issues"
+  },
+  "keywords": [
+    "liquid-glass",
+    "glassmorphism",
+    "optical-ui",
+    "refraction",
+    "apple-glass",
+    "react",
+    "vue",
+    "svelte",
+    "angular",
+    "solidjs",
+    "zero-webgl"
+  ],
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.mjs",
+  "types": "./types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./types/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.cjs"
+    },
+    "./react": {
+      "types": "./types/react.d.ts",
+      "import": "./dist/react.mjs",
+      "require": "./dist/react.cjs"
+    },
+    "./vue": {
+      "types": "./types/vue.d.ts",
+      "import": "./dist/vue.mjs",
+      "require": "./dist/vue.cjs"
+    },
+    "./svelte": {
+      "types": "./types/svelte.d.ts",
+      "import": "./dist/svelte.mjs",
+      "require": "./dist/svelte.cjs"
+    },
+    "./angular": {
+      "types": "./types/angular.d.ts",
+      "import": "./dist/angular.mjs",
+      "require": "./dist/angular.cjs"
+    },
+    "./solid": {
+      "types": "./types/solid.d.ts",
+      "import": "./dist/solid.mjs",
+      "require": "./dist/solid.cjs"
+    },
+    "./tables": {
+      "import": "./dist/tables.mjs",
+      "require": "./dist/tables.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "types",
+    "example/index.html",
+    "example/package.json",
+    "example/vite.config.js",
+    "example/README.md",
+    "example/src",
+    "tables/optical_calibration_matrix.xlsx",
+    "tables/optical_calibration_matrix.csv",
+    "screen.png",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "example": "cd example && npm install && npm run dev",
+    "prepublishOnly": "node build.mjs"
+  },
+  "peerDependencies": {
+    "@angular/core": ">=14.0.0",
+    "react": ">=17.0.0",
+    "solid-js": ">=1.5.0",
+    "svelte": ">=3.0.0",
+    "vue": ">=3.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@angular/core": {
+      "optional": true
+    },
+    "react": {
+      "optional": true
+    },
+    "solid-js": {
+      "optional": true
+    },
+    "svelte": {
+      "optional": true
+    },
+    "vue": {
+      "optional": true
+    }
+  },
+  "sideEffects": false,
+  "license": "MIT"
+}
+
