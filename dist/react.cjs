@@ -106,4 +106,6 @@ exports.LiquidGlassController = require('./core.cjs').LiquidGlassController;
 exports.OPTICAL_DEFAULTS = require('./core.cjs').OPTICAL_DEFAULTS;
 exports.OPTICAL_LIMITS = require('./core.cjs').OPTICAL_LIMITS;
 exports.scheduleStageRedraw = require('./core.cjs').scheduleStageRedraw;
+exports.setUseWebGL = require('./core.cjs').setUseWebGL;
+exports.isWebGLActive = require('./core.cjs').isWebGLActive;
 exports.default = LiquidGlass;

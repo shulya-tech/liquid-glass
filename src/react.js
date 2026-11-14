@@ -105,6 +105,8 @@ export {
   LiquidGlassController,
   OPTICAL_DEFAULTS,
   OPTICAL_LIMITS,
-  scheduleStageRedraw
+  scheduleStageRedraw,
+  setUseWebGL,
+  isWebGLActive
 } from './core.js';
 export default LiquidGlass;

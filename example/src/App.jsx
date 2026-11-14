@@ -8,7 +8,9 @@ import React, {
 import {
   LiquidGlass,
   OPTICAL_DEFAULTS,
-  scheduleStageRedraw
+  scheduleStageRedraw,
+  setUseWebGL,
+  isWebGLActive
 } from '@shulya/liquid-glass/react';
 
 /**
@@ -286,6 +288,9 @@ export default function App() {
   const [height, setHeight] = useState(OPTICAL_DEFAULTS.height);
   const [frosted, setFrosted] = useState(OPTICAL_DEFAULTS.frosted);
   const [fusion, setFusion] = useState(OPTICAL_DEFAULTS.fusion);
+  const [useGpu, setUseGpu] = useState(true);
+  const [fps, setFps] = useState(60);
+  const [frameMs, setFrameMs] = useState(1.0);
 
   // 1. «Золотое сечение» на старте (computeOptimalDpr)
   const initialDpr = computeOptimalDpr();
@@ -330,15 +335,20 @@ export default function App() {
     if (stageRef.current) {
       drawStageBackground(stageRef.current, dpr);
     }
+  }, [dpr]);
+
+  useLayoutEffect(() => {
     scheduleStageRedraw();
-  }, [dpr, shapes, rim, ior, height, frosted, fusion]);
+  }, [shapes, rim, ior, height, frosted, fusion]);
 
   // 2. Динамический регулятор FPS в реальном времени (stepAnimation):
-  // Если 3 кадра подряд длятся > 22 мс (FPS < 45), плавно адаптируем DPR на ступень вниз (* 0.85, не ниже 1.35)
   useEffect(() => {
     let lastFrameTime = performance.now();
     let consecutiveSlowFrames = 0;
     let lastDprDropTime = 0;
+    let framesCount = 0;
+    let lastFpsUpdate = performance.now();
+    let accumulatedDelta = 0;
     let rafId;
 
     const stepAnimation = (timestamp) => {
@@ -348,10 +358,22 @@ export default function App() {
       // Фильтруем паузы вкладки и фоновый режим
       const isVisible = typeof document === 'undefined' || !document.hidden;
       if (isVisible && frameDelta > 0 && frameDelta <= 2000) {
-        // > 22 мс соответствует падению FPS ниже 45
-        if (frameDelta > 22) {
+        framesCount++;
+        accumulatedDelta += frameDelta;
+
+        if (timestamp - lastFpsUpdate >= 400) {
+          const currentFps = Math.round((framesCount * 1000) / (timestamp - lastFpsUpdate));
+          const avgMs = accumulatedDelta / framesCount;
+          setFps(Math.min(120, currentFps));
+          setFrameMs(avgMs);
+          framesCount = 0;
+          accumulatedDelta = 0;
+          lastFpsUpdate = timestamp;
+        }
+
+        // > 22 мс соответствует падению FPS ниже 45 (только для CPU режима)
+        if (!useGpu && frameDelta > 22) {
           consecutiveSlowFrames++;
-          // Если 3 кадра подряд длятся > 22 мс:
           if (consecutiveSlowFrames >= 3 && timestamp - lastDprDropTime >= 100) {
             const current = dprRef.current;
             const nextDpr = Math.max(1.35, +(current * 0.85).toFixed(2));
@@ -362,7 +384,6 @@ export default function App() {
             consecutiveSlowFrames = 0;
           }
         } else {
-          // Если кадр выполнился быстро (<= 22 мс), сбрасываем серию медленных кадров
           consecutiveSlowFrames = 0;
         }
       } else {
@@ -374,7 +395,7 @@ export default function App() {
 
     rafId = requestAnimationFrame(stepAnimation);
     return () => cancelAnimationFrame(rafId);
-  }, []);
+  }, [useGpu]);
 
   // Top-left dragging
   const handlePointerDown = useCallback((id, e) => {
@@ -396,25 +417,46 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    let rafMoveId = null;
+    let pendingCoords = null;
+
     const handlePointerMove = (e) => {
       if (!dragState.current) return;
       const { id, offX, offY } = dragState.current;
-      const nextX = e.clientX - offX;
-      const nextY = e.clientY - offY;
+      pendingCoords = { id, nextX: e.clientX - offX, nextY: e.clientY - offY };
 
-      setShapes((prev) =>
-        prev.map((s) => (s.id === id ? { ...s, x: nextX, y: nextY } : s))
-      );
+      if (!rafMoveId) {
+        rafMoveId = requestAnimationFrame(() => {
+          rafMoveId = null;
+          if (!pendingCoords) return;
+          const { id: targetId, nextX, nextY } = pendingCoords;
+          setShapes((prev) =>
+            prev.map((s) => (s.id === targetId ? { ...s, x: nextX, y: nextY } : s))
+          );
+        });
+      }
     };
 
     const handlePointerUp = () => {
+      if (rafMoveId) {
+        cancelAnimationFrame(rafMoveId);
+        rafMoveId = null;
+      }
+      if (pendingCoords) {
+        const { id: targetId, nextX, nextY } = pendingCoords;
+        pendingCoords = null;
+        setShapes((prev) =>
+          prev.map((s) => (s.id === targetId ? { ...s, x: nextX, y: nextY } : s))
+        );
+      }
       dragState.current = null;
     };
 
-    window.addEventListener('pointermove', handlePointerMove);
-    window.addEventListener('pointerup', handlePointerUp);
-    window.addEventListener('pointercancel', handlePointerUp);
+    window.addEventListener('pointermove', handlePointerMove, { passive: true });
+    window.addEventListener('pointerup', handlePointerUp, { passive: true });
+    window.addEventListener('pointercancel', handlePointerUp, { passive: true });
     return () => {
+      if (rafMoveId) cancelAnimationFrame(rafMoveId);
       window.removeEventListener('pointermove', handlePointerMove);
       window.removeEventListener('pointerup', handlePointerUp);
       window.removeEventListener('pointercancel', handlePointerUp);
@@ -520,6 +562,38 @@ export default function App() {
           />
           <span>Liquid Fusion</span>
         </label>
+
+        <label
+          className="ctrl-toggle"
+          style={{
+            cursor: 'pointer',
+            background: useGpu ? 'rgba(0, 122, 255, 0.12)' : 'rgba(255, 149, 0, 0.15)'
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={useGpu}
+            onChange={(e) => {
+              const val = e.target.checked;
+              setUseGpu(val);
+              setUseWebGL(val);
+              scheduleStageRedraw();
+            }}
+          />
+          <span style={{ fontWeight: 700, color: useGpu ? '#007aff' : '#d70015' }}>
+            {useGpu ? '⚡ WebGL (GPU)' : '🐢 Canvas (CPU)'}
+          </span>
+        </label>
+
+        <div
+          className="fps-tag"
+          style={{
+            background: isWebGLActive() ? 'rgba(48, 209, 88, 0.15)' : 'rgba(255, 149, 0, 0.15)',
+            color: isWebGLActive() ? '#248a3d' : '#e05300'
+          }}
+        >
+          {fps} FPS ({frameMs.toFixed(1)} ms) — {isWebGLActive() ? 'GPU' : 'CPU'}
+        </div>
       </div>
     </>
   );
