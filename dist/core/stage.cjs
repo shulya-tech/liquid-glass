@@ -475,7 +475,7 @@ function renderAllActiveLenses() {
     const bridgeRamp = tRamp * tRamp * (3.0 - 2.0 * tRamp);
     const easedFusionSpan = Math.round(groupThresh * bridgeRamp);
 
-    const cssPad = Math.max(maxRim + 16, 44);
+    const cssPad = Math.max(maxRim + 16, 52);
     const boxCssLeft = Math.max(0, Math.floor(minCssX - cssPad));
     const boxCssTop = Math.max(0, Math.floor(minCssY - cssPad));
     const boxCssRight = Math.min(vw, Math.ceil(maxCssX + cssPad));
