@@ -185,20 +185,19 @@ float mapFusedScene(vec2 p) {
 }
 
 // Unified GPU drop shadow for all elements and liquid bridges
-// Calibrated to match the soft optical diffusion of CSS box-shadow: 0 14px 28px rgba(0, 0, 0, 0.16), 0 2px 6px rgba(0, 0, 0, 0.06)
+// Calibrated to match CSS box-shadow: 0 14px 28px rgba(0, 0, 0, 0.16), 0 2px 6px rgba(0, 0, 0, 0.06)
 vec4 calcDropShadow(vec2 p) {
   vec2 off1 = vec2(0.0, 14.0 * u_dpr);
-  float blur1 = 30.0 * u_dpr;
+  float blur1 = 28.0 * u_dpr;
   float d1 = mapScene(p - off1);
-  float a1 = smoothstep(0.0, 1.0, 0.5 - 0.5 * (d1 / blur1)) * 0.135;
+  float a1 = smoothstep(0.0, 1.0, 0.5 - 0.5 * (d1 / blur1)) * 0.15;
 
   vec2 off2 = vec2(0.0, 2.0 * u_dpr);
-  float blur2 = 7.0 * u_dpr;
+  float blur2 = 6.0 * u_dpr;
   float d2 = mapScene(p - off2);
-  float a2 = smoothstep(0.0, 1.0, 0.5 - 0.5 * (d2 / blur2)) * 0.05;
+  float a2 = smoothstep(0.0, 1.0, 0.5 - 0.5 * (d2 / blur2)) * 0.055;
 
-  // Porter-Duff 'over' alpha compositing instead of additive clamp to prevent over-darkening
-  float totalA = a1 + a2 - a1 * a2;
+  float totalA = clamp(a1 + a2, 0.0, 1.0);
   return vec4(0.0, 0.0, 0.0, totalA);
 }
 
