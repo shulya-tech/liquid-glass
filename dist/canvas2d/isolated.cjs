@@ -124,7 +124,7 @@ exports.renderIsolatedController = function renderIsolatedController(ctrl, rect,
   }
 
   ctrl._ctx.putImageData(lensImg, 0, 0);
-  if (ctrl._canvas.style.display !== 'block') {
-    ctrl._canvas.style.display = 'block';
+  if (ctrl._canvas.style.visibility !== 'visible') {
+    ctrl._canvas.style.visibility = 'visible';
   }
 }

@@ -105,6 +105,7 @@ export class LiquidGlassController {
       z-index: 0;
       border-radius: inherit;
       display: block;
+      visibility: visible;
     `;
     this.element.insertBefore(canvas, this.element.firstChild);
     this._canvas = canvas;

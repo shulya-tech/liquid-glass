@@ -137,7 +137,8 @@ function ensureWebGLRenderer(targetTier = 1024) {
       left: 0;
       top: 0;
       pointer-events: none;
-      display: none;
+      display: block;
+      visibility: hidden;
       will-change: transform;
     `;
     canvas.width = targetTier;
@@ -194,12 +195,20 @@ function captureViewportStage(customDpr = 0) {
   stageCtx.fillStyle = getBodyBg();
   stageCtx.fillRect(0, 0, bw, bh);
 
-  // 3. Copy any background 2D canvas using physical buffer pixels
-  const bgCanvases = document.querySelectorAll(
-    'canvas:not(.lg-lens-canvas):not(.lg-cluster-canvas):not(.lg-webgl-canvas)'
-  );
-  for (let i = 0; i < bgCanvases.length; i++) {
-    const c = bgCanvases[i];
+  // 3. Copy any genuine user/page background canvas using physical buffer pixels (exclude all LiquidGlass canvases)
+  const allCanvases = document.querySelectorAll('canvas');
+  for (let i = 0; i < allCanvases.length; i++) {
+    const c = allCanvases[i];
+    if (
+      c === stageCanvas ||
+      c === blurCanvas ||
+      c === domCacheCanvas ||
+      c === webglCanvas ||
+      (c.className && String(c.className).includes('lg-')) ||
+      c.getAttribute('data-lg-ignore') === 'true'
+    ) {
+      continue;
+    }
     if (c.width > 0 && c.height > 0) {
       try {
         const cr = c.getBoundingClientRect();
@@ -261,8 +270,8 @@ function renderAllActiveLenses() {
   }
 
   if (visible.length === 0) {
-    if (webglCanvas && webglCanvas.style.display !== 'none') {
-      webglCanvas.style.display = 'none';
+    if (webglCanvas && webglCanvas.style.visibility !== 'hidden') {
+      webglCanvas.style.visibility = 'hidden';
     }
     return;
   }
@@ -392,8 +401,8 @@ function renderAllActiveLenses() {
   for (let i = 0; i < isolated.length; i++) {
     const { ctrl, rect } = isolated[i];
     ctrl._fused = false;
-    if (ctrl._canvas && ctrl._canvas.style.display !== 'block') {
-      ctrl._canvas.style.display = 'block';
+    if (ctrl._canvas && ctrl._canvas.style.visibility !== 'visible') {
+      ctrl._canvas.style.visibility = 'visible';
     }
     const targetShadow = ctrl._savedShadow || DEFAULT_SHADOW;
     if (ctrl.element && ctrl.element.style.boxShadow !== targetShadow) {
@@ -407,8 +416,8 @@ function renderAllActiveLenses() {
 
   // 2. Render fused clusters using the shared WebGL cluster canvas (Dynamic Bounding Box + Fixed GPU Texture)
   if (fusedGroups.length === 0) {
-    if (webglCanvas && webglCanvas.style.display !== 'none') {
-      webglCanvas.style.display = 'none';
+    if (webglCanvas && webglCanvas.style.visibility !== 'hidden') {
+      webglCanvas.style.visibility = 'hidden';
     }
     return;
   }
@@ -417,8 +426,11 @@ function renderAllActiveLenses() {
     for (let i = 0; i < group.length; i++) {
       const item = group[i];
       item.ctrl._fused = true;
-      if (item.ctrl._canvas && item.ctrl._canvas.style.display !== 'none') {
-        item.ctrl._canvas.style.display = 'none';
+      if (item.ctrl._canvas && item.ctrl._canvas.style.visibility !== 'hidden') {
+        item.ctrl._canvas.style.visibility = 'hidden';
+      }
+      if (item.ctrl._ctx && item.ctrl._canvas) {
+        item.ctrl._ctx.clearRect(0, 0, item.ctrl._canvas.width, item.ctrl._canvas.height);
       }
       if (item.ctrl.element && item.ctrl.element.style.boxShadow !== 'none') {
         item.ctrl.element.style.boxShadow = 'none';
@@ -457,13 +469,13 @@ function renderAllActiveLenses() {
     }
 
     // Continuous dynamic bridge ramp:
-    // When distance is near threshold, bridge starts smoothly and widens as distance closes.
-    // Completely eliminates visual jumping / popping at the contact boundary!
-    const effectiveThresh = groupThresh + 16;
+    // Starts at strictly 0 at the threshold boundary and widens continuously as distance closes.
+    // 100% eliminates visual popping or distortion jumps at the contact boundary!
+    const effectiveThresh = groupThresh;
     const clampedDist = Math.max(0, Math.min(groupMinDist, effectiveThresh));
     const tRamp = 1.0 - clampedDist / effectiveThresh;
     const bridgeRamp = tRamp * tRamp * (3.0 - 2.0 * tRamp);
-    const easedFusionSpan = Math.max(16, Math.round(groupThresh * bridgeRamp));
+    const easedFusionSpan = Math.round(groupThresh * bridgeRamp);
 
     const cssPad = Math.max(maxRim + 16, 44);
     const boxCssLeft = Math.max(0, Math.floor(minCssX - cssPad));
@@ -481,8 +493,8 @@ function renderAllActiveLenses() {
     activeClusterTier = targetTier;
 
     if (ensureWebGLRenderer(targetTier)) {
-      if (webglCanvas.style.display !== 'block') {
-        webglCanvas.style.display = 'block';
+      if (webglCanvas.style.visibility !== 'visible') {
+        webglCanvas.style.visibility = 'visible';
       }
       const tierCssW = `${targetTier / dpr}px`;
       const tierCssH = `${targetTier / dpr}px`;
