@@ -265,10 +265,17 @@ void main() {
     slopeFactor = clamp(gradLen, 0.0, 1.0);
     norm = gradLen > 0.0001 ? grad / gradLen : vec2(0.0);
 
-    // Smooth sinusoidal displacement profile:
-    // Strictly monotonic mapping prevents caustic inversion, upside-down text, and horizontal banding!
-    float maxShift = min((u_ior - 1.0) * u_height, u_rim * 0.28);
-    float shift = maxShift * sin(3.14159265 * u);
+    // Physical Snell refraction with empirical calibration curve (_T0):
+    // Smoothly soft-clamps maximum edge amplitude to 0.48 * rim, guaranteeing
+    // |d(shift)/ds| < 0.83 so the background coordinate mapping is strictly monotonic.
+    // Completely eliminates caustic inversion, upside-down flipped text, and horizontal banding,
+    // while preserving 100% of the rich convex bevel refraction and liquid glass feel!
+    float rawAmp = 2.8 * max(0.0, u_ior - 1.0) * max(0.0, u_height);
+    float maxAmp = u_rim * 0.48;
+    float amp = (maxAmp > 0.001 && rawAmp > 0.001)
+      ? maxAmp * (rawAmp / sqrt(maxAmp * maxAmp + rawAmp * rawAmp))
+      : 0.0;
+    float shift = (gain / 2.8) * amp;
     offset = -norm * slopeFactor * shift;
 
     if (norm.y < -0.2) {

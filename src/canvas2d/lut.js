@@ -36,6 +36,13 @@ export function buildElementLUT(w, h, rad, rawOptions = {}, dpr = 1) {
   const innerSafeX = Math.max(0, halfW - rPx - rimPx - 2);
   const innerSafeY = Math.max(0, halfH - rPx - rimPx - 2);
 
+  const rawAmp = 2.8 * Math.max(0, ior - 1.0) * Math.max(0, heightPx);
+  const maxAmp = rimPx * 0.48;
+  const amp =
+    maxAmp > 0.001 && rawAmp > 0.001
+      ? maxAmp * (rawAmp / Math.sqrt(maxAmp * maxAmp + rawAmp * rawAmp))
+      : 0;
+
   for (let y = 0; y < h; y++) {
     const py = y - halfH;
     const isSafeY = Math.abs(py) < innerSafeY;
@@ -72,8 +79,7 @@ export function buildElementLUT(w, h, rad, rawOptions = {}, dpr = 1) {
           const gx = dx / len;
           const gy = dy / len;
 
-          const maxShift = Math.min((ior - 1.0) * heightPx, rimPx * 0.28);
-          const shift = maxShift * Math.sin(Math.PI * u);
+          const shift = (gain / 2.8) * amp;
           offsets[idx * 2] = Math.round(-gx * shift);
           offsets[idx * 2 + 1] = Math.round(-gy * shift);
 
