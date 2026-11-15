@@ -18,7 +18,7 @@ function resolveCanvasFont(style) {
 
   // Strip CSS variables like var(--font-inter) which Canvas 2D does not parse
   family = family.replace(/var\([^)]+\),?\s*/g, '');
-  family = family.replace(/^,\s*|,\s*$/g, '').trim();
+  family = family.replace(/^,\s*|,\s*$/g, '').trim(); 
   if (!family) {
     family = 'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
   }

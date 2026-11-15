@@ -464,17 +464,6 @@ export default function App() {
       currentX: target.x,
       currentY: target.y
     };
-
-    // Bring picked element to the top via DOM (zero React re-renders)
-    topZRef.current += 1;
-    const el = shapeDomRefs.current[id];
-    if (el) {
-      if (el._lgController && typeof el._lgController.setZIndex === 'function') {
-        el._lgController.setZIndex(topZRef.current);
-      } else {
-        el.style.zIndex = String(topZRef.current);
-      }
-    }
   }, []);
 
   // Pointer move & up: zero-overhead DOM tracking without React re-render lag
@@ -549,13 +538,14 @@ export default function App() {
           dpr={dpr}
           className="glass-body"
           data-lg-tint="rgba(255, 255, 255, 0.18)"
+          data-lg-z-index={20}
           onPointerDown={(e) => handlePointerDown(s.id, e)}
           style={{
             width: `${s.w}px`,
             height: `${s.h}px`,
             borderRadius: `${s.r}px`,
             transform: `translate3d(${s.x}px, ${s.y}px, 0)`,
-            zIndex: 20 + index
+            zIndex: 20
           }}
         />
       ))}

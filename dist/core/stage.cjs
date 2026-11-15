@@ -9,17 +9,22 @@ const { getDevicePixelRatio,
   hasLiveBackgroundCanvas,
   areRectsTouching } = require('./dom.cjs');
 const { renderDomSurfacesToCache } = require('./dom-cache.cjs');
+const { renderIsolatedController } = require('../canvas2d/isolated.cjs');
 const { WebGLGlassRenderer } = require('../webgl/renderer.cjs');
 
 const controllerRegistry = exports.controllerRegistry = new Set();
 
 let stageCanvas = null;
 let stageCtx = null;
+let blurCanvas = null;
+let blurCtx = null;
+let lastFrostedRadius = -1;
 let domCacheCanvas = null;
 let domCacheCtx = null;
 let domCacheDirty = true;
 let webglCanvas = null;
 let webglRenderer = null;
+let activeClusterTier = 0;
 let rafScheduled = false;
 let rafId = 0;
 let listenersAttached = false;
@@ -64,6 +69,11 @@ function ensureStageBuffers(customDpr = 0) {
       domCacheCanvas.height = bufH;
       domCacheDirty = true;
     }
+    if (blurCanvas) {
+      blurCanvas.width = bufW;
+      blurCanvas.height = bufH;
+      lastFrostedRadius = -1;
+    }
     stageDirty = true;
   }
 
@@ -84,35 +94,56 @@ exports.isWebGLActive = function isWebGLActive() {
   return webglRenderer !== null;
 }
 
-function ensureWebGLRenderer(customDpr = 0) {
+/**
+ * Tier selection with hysteresis: prevents constant GPU buffer recreation on drag.
+ * 512 covers up to 450px; 1024 covers 280–920px; 2048 covers above 720px.
+ */
+function getTierSizeWithHysteresis(currentTier, maxDim) {
+  if (currentTier === 0) {
+    if (maxDim <= 450) return 512;
+    if (maxDim <= 920) return 1024;
+    return 2048;
+  }
+  if (currentTier === 512) {
+    if (maxDim > 450) return 1024;
+    return 512;
+  }
+  if (currentTier === 1024) {
+    if (maxDim > 920) return 2048;
+    if (maxDim < 280) return 512;
+    return 1024;
+  }
+  if (currentTier === 2048) {
+    if (maxDim < 720) return 1024;
+    return 2048;
+  }
+  return 1024;
+}
+
+function ensureWebGLRenderer(targetTier = 1024) {
   if (typeof document === 'undefined') return false;
-  const dpr = getDevicePixelRatio(customDpr);
-  const docEl = document.documentElement;
-  const vw = Math.max(1, window.innerWidth, docEl ? docEl.clientWidth : 0);
-  const vh = Math.max(1, window.innerHeight, docEl ? docEl.clientHeight : 0);
-  const bufW = Math.max(1, Math.round(vw * dpr));
-  const bufH = Math.max(1, Math.round(vh * dpr));
 
   if (!webglCanvas) {
     const canvas = document.createElement('canvas');
-    canvas.className = 'lg-webgl-canvas';
+    canvas.className = 'lg-cluster-webgl-canvas';
     canvas.setAttribute('aria-hidden', 'true');
     canvas.style.cssText = `
       position: fixed;
-      inset: 0;
-      width: 100%;
-      height: 100%;
+      left: 0;
+      top: 0;
       pointer-events: none;
-      z-index: 10;
       display: none;
+      will-change: transform;
     `;
+    canvas.width = targetTier;
+    canvas.height = targetTier;
     document.body.appendChild(canvas);
     webglCanvas = canvas;
   }
 
-  if (webglCanvas.width !== bufW || webglCanvas.height !== bufH) {
-    webglCanvas.width = bufW;
-    webglCanvas.height = bufH;
+  if (webglCanvas.width !== targetTier || webglCanvas.height !== targetTier) {
+    webglCanvas.width = targetTier;
+    webglCanvas.height = targetTier;
   }
 
   if (!webglRenderer) {
@@ -236,7 +267,7 @@ function renderAllActiveLenses() {
   const bufH = Math.max(1, Math.round(vh * dpr));
 
   // Disjoint-set clustering of visible elements:
-  // Elements that are touching/fusing are united into a single cluster.
+  // Elements that are touching/fusing are united into a single cluster ONLY if they share the exact same z-index!
   const n = visible.length;
   const parent = new Int32Array(n);
   for (let i = 0; i < n; i++) parent[i] = i;
@@ -253,9 +284,15 @@ function renderAllActiveLenses() {
 
   for (let i = 0; i < n; i++) {
     if (!visible[i].ctrl.options.fusion) continue;
-    const thresh = visible[i].ctrl.options.fusionDistance || DEFAULT_FUSION_DISTANCE;
+    const zI = visible[i].ctrl._cachedZIndex || 20;
+    const threshI = visible[i].ctrl.options.fusionDistance || DEFAULT_FUSION_DISTANCE;
     for (let j = i + 1; j < n; j++) {
       if (!visible[j].ctrl.options.fusion) continue;
+      const zJ = visible[j].ctrl._cachedZIndex || 20;
+      // STRICT: only elements with the exact same z-index can coalesce/fuse!
+      if (zI !== zJ) continue;
+
+      const thresh = Math.max(threshI, visible[j].ctrl.options.fusionDistance || DEFAULT_FUSION_DISTANCE);
       if (areRectsTouching(visible[i].rect, visible[j].rect, thresh)) {
         union(i, j);
       }
@@ -269,78 +306,15 @@ function renderAllActiveLenses() {
     clusterGroups.get(root).push(visible[i]);
   }
 
-  const clusters = [];
+  const isolated = [];
+  const fusedGroups = [];
 
   for (const group of clusterGroups.values()) {
-    const isFused = group.length > 1;
-    let minCssX = Infinity,
-      minCssY = Infinity,
-      maxCssX = -Infinity,
-      maxCssY = -Infinity;
-
-    for (let i = 0; i < group.length; i++) {
-      const item = group[i];
-      item.ctrl._fused = isFused;
-      const r = item.rect;
-      if (r.left < minCssX) minCssX = r.left;
-      if (r.top < minCssY) minCssY = r.top;
-      if (r.right > maxCssX) maxCssX = r.right;
-      if (r.bottom > maxCssY) maxCssY = r.bottom;
+    if (group.length === 1) {
+      isolated.push(group[0]);
+    } else {
+      fusedGroups.push(group);
     }
-
-    // Compute bounding box expanded by refraction rim and liquid drop shadow
-    let maxRim = 16;
-    for (let i = 0; i < group.length; i++) {
-      const rimVal = group[i].ctrl.options.rim;
-      if (typeof rimVal === 'number' && rimVal > maxRim) maxRim = rimVal;
-    }
-    const cssPad = Math.max(maxRim + 16, 44);
-
-    const boxCssLeft = Math.max(0, Math.floor(minCssX - cssPad));
-    const boxCssTop = Math.max(0, Math.floor(minCssY - cssPad));
-    const boxCssRight = Math.min(vw, Math.ceil(maxCssX + cssPad));
-    const boxCssBottom = Math.min(vh, Math.ceil(maxCssY + cssPad));
-
-    const cX = Math.max(0, Math.floor(boxCssLeft * dpr));
-    const cY = Math.max(0, Math.floor(boxCssTop * dpr));
-    const cRight = Math.min(bufW, Math.ceil(boxCssRight * dpr));
-    const cBottom = Math.min(bufH, Math.ceil(boxCssBottom * dpr));
-    const cW = Math.max(0, cRight - cX);
-    const cH = Math.max(0, cBottom - cY);
-
-    if (cW <= 0 || cH <= 0) continue;
-
-    // WebGL Scissor box (Y=0 is bottom of canvas in WebGL)
-    const scissorX = cX;
-    const scissorY = Math.max(0, bufH - cBottom);
-    const scissorW = cW;
-    const scissorH = cH;
-
-    // WebGL canvas is fixed inset:0 (left:0, top:0), zero synchronous layout reflow
-    const elements = group.map(({ ctrl, rect }) => ({
-      x: rect.left,
-      y: rect.top,
-      w: rect.width,
-      h: rect.height,
-      borderRadius: ctrl._getRadius(),
-      shape: ctrl._getShape(),
-      tint: ctrl._tint,
-      fusion: ctrl.options.fusion,
-      fused: isFused
-    }));
-
-    const primaryCtrl = group[group.length - 1].ctrl;
-
-    clusters.push({
-      elements,
-      hasFused: isFused,
-      options: primaryCtrl.options,
-      scissorX,
-      scissorY,
-      scissorW,
-      scissorH,
-      boxCss: { left: boxCssLeft, top: boxCssTop, right: boxCssRight, bottom: boxCssBottom }
-    });
   }
 
   let activeSourceCanvas = stageCanvas;
@@ -354,7 +328,7 @@ function renderAllActiveLenses() {
     const mainEl = typeof document !== 'undefined' ? document.querySelector('main, footer') : null;
     if (!mainEl && typeof document !== 'undefined') {
       const bgCanvases = document.querySelectorAll(
-        'canvas:not(.lg-lens-canvas):not(.lg-cluster-canvas):not(.lg-webgl-canvas)'
+        'canvas:not(.lg-lens-canvas):not(.lg-cluster-canvas):not(.lg-cluster-webgl-canvas):not(.lg-webgl-canvas)'
       );
       if (bgCanvases.length === 1) {
         cachedDirectBgCanvas = bgCanvases[0];
@@ -382,14 +356,138 @@ function renderAllActiveLenses() {
     stageDirty = false;
   }
 
-  // WebGL hardware-accelerated pass with per-cluster scissor boxes
-  if (ensureWebGLRenderer(activeDpr)) {
-    try {
-      const primaryCtrl = visible[visible.length - 1].ctrl;
+  // 1. Render isolated lenses directly into their own internal <canvas class="lg-lens-canvas">
+  let blurSourceCtx = stageCtx;
+  if (maxFrosted > 0 && stageCanvas) {
+    if (!blurCanvas) {
+      blurCanvas = document.createElement('canvas');
+      blurCtx = blurCanvas.getContext('2d');
+    }
+    if (blurCanvas.width !== bufW || blurCanvas.height !== bufH) {
+      blurCanvas.width = bufW;
+      blurCanvas.height = bufH;
+      lastFrostedRadius = -1;
+    }
+    const blurRadius = Math.round(maxFrosted * dpr);
+    if (blurRadius !== lastFrostedRadius || needsCapture) {
+      lastFrostedRadius = blurRadius;
+      blurCtx.filter = `blur(${blurRadius}px)`;
+      blurCtx.drawImage(stageCanvas, 0, 0);
+      blurCtx.filter = 'none';
+    }
+    blurSourceCtx = blurCtx;
+  }
+
+  for (let i = 0; i < isolated.length; i++) {
+    const { ctrl, rect } = isolated[i];
+    ctrl._fused = false;
+    if (ctrl._canvas && ctrl._canvas.style.opacity !== '1') {
+      ctrl._canvas.style.opacity = '1';
+    }
+    renderIsolatedController(ctrl, rect, {
+      stageCtx,
+      blurCtx: blurSourceCtx
+    });
+  }
+
+  // 2. Render fused clusters using the shared WebGL cluster canvas (Dynamic Bounding Box + Fixed GPU Texture)
+  if (fusedGroups.length === 0) {
+    if (webglCanvas && webglCanvas.style.display !== 'none') {
+      webglCanvas.style.display = 'none';
+    }
+    return;
+  }
+
+  for (const group of fusedGroups) {
+    for (let i = 0; i < group.length; i++) {
+      const item = group[i];
+      item.ctrl._fused = true;
+      if (item.ctrl._canvas && item.ctrl._canvas.style.opacity !== '0') {
+        item.ctrl._canvas.style.opacity = '0';
+      }
+    }
+
+    let minCssX = Infinity,
+      minCssY = Infinity,
+      maxCssX = -Infinity,
+      maxCssY = -Infinity;
+    let maxRim = 16;
+
+    for (let i = 0; i < group.length; i++) {
+      const item = group[i];
+      const r = item.rect;
+      if (r.left < minCssX) minCssX = r.left;
+      if (r.top < minCssY) minCssY = r.top;
+      if (r.right > maxCssX) maxCssX = r.right;
+      if (r.bottom > maxCssY) maxCssY = r.bottom;
+      const rimVal = item.ctrl.options.rim;
+      if (typeof rimVal === 'number' && rimVal > maxRim) maxRim = rimVal;
+    }
+
+    const cssPad = Math.max(maxRim + 16, 44);
+    const boxCssLeft = Math.max(0, Math.floor(minCssX - cssPad));
+    const boxCssTop = Math.max(0, Math.floor(minCssY - cssPad));
+    const boxCssRight = Math.min(vw, Math.ceil(maxCssX + cssPad));
+    const boxCssBottom = Math.min(vh, Math.ceil(maxCssY + cssPad));
+    const boxCssWidth = Math.max(1, boxCssRight - boxCssLeft);
+    const boxCssHeight = Math.max(1, boxCssBottom - boxCssTop);
+
+    const clusterW = Math.round(boxCssWidth * dpr);
+    const clusterH = Math.round(boxCssHeight * dpr);
+    const maxDim = Math.max(clusterW, clusterH);
+
+    const targetTier = getTierSizeWithHysteresis(activeClusterTier, maxDim);
+    activeClusterTier = targetTier;
+
+    if (ensureWebGLRenderer(targetTier)) {
+      if (webglCanvas.style.display !== 'block') {
+        webglCanvas.style.display = 'block';
+      }
+      const tierCssW = `${targetTier / dpr}px`;
+      const tierCssH = `${targetTier / dpr}px`;
+      if (webglCanvas.style.width !== tierCssW) webglCanvas.style.width = tierCssW;
+      if (webglCanvas.style.height !== tierCssH) webglCanvas.style.height = tierCssH;
+      webglCanvas.style.transform = `translate3d(${boxCssLeft}px, ${boxCssTop}px, 0)`;
+
+      const clusterZ = String(group[0].ctrl._cachedZIndex || 20);
+      if (webglCanvas.style.zIndex !== clusterZ) {
+        webglCanvas.style.zIndex = clusterZ;
+      }
+
+      const scissorX = 0;
+      const scissorY = Math.max(0, targetTier - clusterH);
+      const scissorW = Math.min(targetTier, clusterW);
+      const scissorH = Math.min(targetTier, clusterH);
+
+      const elements = group.map(({ ctrl, rect }) => ({
+        x: rect.left,
+        y: rect.top,
+        w: rect.width,
+        h: rect.height,
+        borderRadius: ctrl._getRadius(),
+        shape: ctrl._getShape(),
+        tint: ctrl._tint,
+        fusion: ctrl.options.fusion,
+        fused: true
+      }));
+
+      const primaryCtrl = group[group.length - 1].ctrl;
 
       webglRenderer.render({
         sourceCanvas: activeSourceCanvas,
-        clusters,
+        clusters: [
+          {
+            elements,
+            hasFused: true,
+            options: primaryCtrl.options,
+            areaOriginX: Math.round(boxCssLeft * dpr),
+            areaOriginY: Math.round(boxCssTop * dpr),
+            scissorX,
+            scissorY,
+            scissorW,
+            scissorH
+          }
+        ],
         options: {
           ...primaryCtrl.options,
           frosted: maxFrosted
@@ -397,25 +495,6 @@ function renderAllActiveLenses() {
         dpr,
         sourceCanvasDirty: needsCapture
       });
-
-      if (webglCanvas) {
-        if (webglCanvas.style.display !== 'block') {
-          webglCanvas.style.display = 'block';
-        }
-        let maxZ = 20;
-        for (let i = 0; i < visible.length; i++) {
-          const z = visible[i].ctrl._cachedZIndex || 20;
-          if (z > maxZ) maxZ = z;
-        }
-        const targetZ = Math.max(1, maxZ - 1);
-        const targetZStr = String(targetZ);
-        if (webglCanvas.style.zIndex !== targetZStr) {
-          webglCanvas.style.zIndex = targetZStr;
-        }
-      }
-      return;
-    } catch (e) {
-      console.warn('[LiquidGlass] WebGL render error:', e);
     }
   }
 }

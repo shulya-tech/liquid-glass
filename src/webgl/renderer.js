@@ -49,6 +49,8 @@ export class WebGLGlassRenderer {
 
     // Main Program Uniform locations
     this.uResolution = gl.getUniformLocation(this.program, 'u_resolution');
+    this.uAreaOrigin = gl.getUniformLocation(this.program, 'u_areaOrigin');
+    this.uStageResolution = gl.getUniformLocation(this.program, 'u_stageResolution');
     this.uSource = gl.getUniformLocation(this.program, 'u_source');
     this.uLut = gl.getUniformLocation(this.program, 'u_lut');
     this.uBlur = gl.getUniformLocation(this.program, 'u_blur');
@@ -252,6 +254,8 @@ export class WebGLGlassRenderer {
     }
 
     const frosted = options.frosted || 0;
+    const srcW = sourceCanvas ? sourceCanvas.width : w;
+    const srcH = sourceCanvas ? sourceCanvas.height : h;
 
     // 2. Full-Resolution Native Dual-Kawase Down/Up Pyramid (Recomputed only when frosted/stage changes!)
     const needsBlurUpdate =
@@ -262,7 +266,7 @@ export class WebGLGlassRenderer {
         !this.fboFull);
 
     if (needsBlurUpdate) {
-      this._ensureBlurBuffers(w, h);
+      this._ensureBlurBuffers(srcW, srcH);
       this.lastFrosted = frosted;
       this.lastDpr = dpr;
 
@@ -283,7 +287,7 @@ export class WebGLGlassRenderer {
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, this.sourceTex);
       gl.uniform1i(this.uDownsampleImage, 0);
-      gl.uniform2f(this.uDownsampleHalfPixel, 0.5 / w, 0.5 / h);
+      gl.uniform2f(this.uDownsampleHalfPixel, 0.5 / srcW, 0.5 / srcH);
       this._drawQuad(this.downsampleProgram);
 
       // Downsample 2: fboHalf (W/2) -> fboQuarter (W/4)
@@ -405,6 +409,11 @@ export class WebGLGlassRenderer {
     gl.uniform1i(this.uBlur, 2);
 
     gl.uniform2f(this.uResolution, w, h);
+    gl.uniform2f(
+      this.uStageResolution,
+      sourceCanvas ? sourceCanvas.width : w,
+      sourceCanvas ? sourceCanvas.height : h
+    );
     gl.uniform1f(this.uDpr, dpr);
 
     // Determine clusters to render
@@ -417,6 +426,8 @@ export class WebGLGlassRenderer {
               elements,
               hasFused: elements.some((e) => e.fused),
               options,
+              areaOriginX: 0,
+              areaOriginY: 0,
               scissorX: 0,
               scissorY: 0,
               scissorW: w,
@@ -435,6 +446,11 @@ export class WebGLGlassRenderer {
       if (cluster.scissorW <= 0 || cluster.scissorH <= 0) continue;
 
       gl.scissor(cluster.scissorX, cluster.scissorY, cluster.scissorW, cluster.scissorH);
+      gl.uniform2f(
+        this.uAreaOrigin,
+        cluster.areaOriginX || 0,
+        cluster.areaOriginY || 0
+      );
 
       const clusterOpts = { ...options, ...(cluster.options || {}) };
       const rimPx = Math.max(1, (clusterOpts.rim || 16) * dpr);

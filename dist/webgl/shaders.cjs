@@ -71,7 +71,9 @@ precision mediump float;
 
 varying vec2 v_uv;
 
-uniform vec2 u_resolution; // viewport resolution in physical pixels
+uniform vec2 u_resolution; // cluster canvas buffer resolution (e.g. 512, 1024, 2048)
+uniform vec2 u_areaOrigin; // top-left world coordinate of cluster canvas in physical pixels
+uniform vec2 u_stageResolution; // full viewport background resolution in physical pixels
 uniform sampler2D u_source; // live background texture
 uniform sampler2D u_lut;    // R: _T0, G: _T1, B: _T2, A: _T4
 uniform sampler2D u_blur;   // live GPU-blurred background texture (1:1 native screen resolution)
@@ -207,8 +209,10 @@ vec2 calcGradient(vec2 p) {
 }
 
 void main() {
-  // Convert WebGL bottom-left coordinate to canvas top-left physical pixel coordinate
-  vec2 p = vec2(gl_FragCoord.x, u_resolution.y - gl_FragCoord.y);
+  // Convert WebGL bottom-left coordinate to canvas top-left local coordinate
+  vec2 p_local = vec2(gl_FragCoord.x, u_resolution.y - gl_FragCoord.y);
+  // Map local coordinate to world physical coordinate on the stage
+  vec2 p = u_areaOrigin + p_local;
 
   float d = mapScene(p);
   if (d > 0.5) {
@@ -261,8 +265,10 @@ void main() {
     slopeFactor = clamp(gradLen, 0.0, 1.0);
     norm = gradLen > 0.0001 ? grad / gradLen : vec2(0.0);
 
-    float maxShift = u_rim * 0.72;
-    float shift = clamp(gain * (u_ior - 1.0) * u_height, -maxShift, maxShift);
+    // Smooth sinusoidal displacement profile:
+    // Strictly monotonic mapping prevents caustic inversion, upside-down text, and horizontal banding!
+    float maxShift = min((u_ior - 1.0) * u_height, u_rim * 0.28);
+    float shift = maxShift * sin(3.14159265 * u);
     offset = -norm * slopeFactor * shift;
 
     if (norm.y < -0.2) {
@@ -286,11 +292,11 @@ void main() {
 
   // Chromatic dispersion: separate Red, Green and Blue ray paths (hardware direct UV)
   vec2 baseP = p + offset;
-  vec2 uvG = vec2(baseP.x / u_resolution.x, baseP.y / u_resolution.y);
+  vec2 uvG = vec2(baseP.x / u_stageResolution.x, baseP.y / u_stageResolution.y);
   vec2 pR = p + offset * (1.0 + disp);
-  vec2 uvR = vec2(pR.x / u_resolution.x, pR.y / u_resolution.y);
+  vec2 uvR = vec2(pR.x / u_stageResolution.x, pR.y / u_stageResolution.y);
   vec2 pB = p + offset * (1.0 - disp);
-  vec2 uvB = vec2(pB.x / u_resolution.x, pB.y / u_resolution.y);
+  vec2 uvB = vec2(pB.x / u_stageResolution.x, pB.y / u_stageResolution.y);
 
   vec3 sharpCol;
   if (disp > 0.0001) {

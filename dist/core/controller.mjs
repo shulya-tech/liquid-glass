@@ -71,12 +71,29 @@ export class LiquidGlassController {
     this.element.style.overflow = 'hidden';
 
     // Read element's intended CSS background tint, then make CSS background transparent
-    // so the WebGL screen-space canvas underneath renders the refracted + tinted pixels directly!
+    // so the individual canvas lens / fused cluster renders the refracted + tinted pixels directly!
     const computed = window.getComputedStyle(this.element);
     const attrTint = this.element.getAttribute('data-lg-tint');
     this._savedBg = attrTint || this.element.style.backgroundColor || computed.backgroundColor;
     this._tint = parseCssRgba(this._savedBg);
     this.element.style.backgroundColor = 'transparent';
+
+    const canvas = document.createElement('canvas');
+    canvas.className = 'lg-lens-canvas';
+    canvas.setAttribute('aria-hidden', 'true');
+    canvas.style.cssText = `
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 0;
+      border-radius: inherit;
+      display: block;
+    `;
+    this.element.insertBefore(canvas, this.element.firstChild);
+    this._canvas = canvas;
+    this._ctx = canvas.getContext('2d');
 
     this.element._lgController = this;
     this._rect = null;
@@ -219,6 +236,9 @@ export class LiquidGlassController {
           this.element.style.backgroundColor = this._savedBg;
         } else if (this.enabled) {
           this.element.style.backgroundColor = 'transparent';
+        }
+        if (this._canvas) {
+          this._canvas.style.display = this.enabled ? 'block' : 'none';
         }
       }
       changed = true;
