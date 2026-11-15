@@ -422,16 +422,24 @@ export default function App() {
     window.addEventListener('resize', handleResize);
 
     let lastBgTime = 0;
+    let dragPausedTime = 0;
+    let dragStartTime = 0;
 
-    // Smooth continuous ambient background animation at 30 FPS
+    // Ambient background loop: idle 30 FPS updates with zero drag interference
     const loop = (timestamp) => {
       const isDragging = Boolean(dragState.current);
-      const bgInterval = 1000 / 30;
-
-      if (timestamp - lastBgTime >= bgInterval) {
-        lastBgTime = timestamp;
-        drawStageBackground(canvas, dprRef.current, timestamp);
-        if (!isDragging) {
+      if (isDragging) {
+        if (!dragStartTime) dragStartTime = timestamp;
+      } else {
+        if (dragStartTime) {
+          dragPausedTime += (timestamp - dragStartTime);
+          dragStartTime = 0;
+        }
+        const effectiveTime = timestamp - dragPausedTime;
+        const bgInterval = 1000 / 30;
+        if (timestamp - lastBgTime >= bgInterval) {
+          lastBgTime = timestamp;
+          drawStageBackground(canvas, dprRef.current, effectiveTime);
           redrawStageNow(true);
         }
       }
@@ -460,16 +468,13 @@ export default function App() {
 
   // Top-left dragging: direct zero-overhead DOM tracking without React re-render hitch
   const handlePointerDown = useCallback((id, e) => {
-    e.currentTarget.setPointerCapture(e.pointerId);
     const target = shapesRef.current.find((s) => s.id === id);
     if (!target) return;
 
     dragState.current = {
       id,
-      offX: Math.round(e.clientX - target.x),
-      offY: Math.round(e.clientY - target.y),
-      targetX: target.x,
-      targetY: target.y,
+      offX: e.clientX - target.x,
+      offY: e.clientY - target.y,
       currentX: target.x,
       currentY: target.y
     };
@@ -491,17 +496,22 @@ export default function App() {
     const handlePointerMove = (e) => {
       if (!dragState.current) return;
       const d = dragState.current;
-      d.targetX = Math.round(e.clientX - d.offX);
-      d.targetY = Math.round(e.clientY - d.offY);
-      d.currentX = d.targetX;
-      d.currentY = d.targetY;
+      const evt =
+        e.getCoalescedEvents && e.getCoalescedEvents().length > 0
+          ? e.getCoalescedEvents()[e.getCoalescedEvents().length - 1]
+          : e;
 
-      // 1. Instantly move DOM element with 0ms latency
+      const newX = evt.clientX - d.offX;
+      const newY = evt.clientY - d.offY;
+      d.currentX = newX;
+      d.currentY = newY;
+
+      // 1. Instantly move DOM element with subpixel hardware precision (0ms latency)
       const el = shapeDomRefs.current[d.id];
       if (el) {
-        el.style.transform = `translate3d(${d.currentX}px, ${d.currentY}px, 0)`;
+        el.style.transform = `translate3d(${newX}px, ${newY}px, 0)`;
         if (el._lgController) {
-          el._lgController.setRectPosition(d.currentX, d.currentY);
+          el._lgController.setRectPosition(newX, newY);
         }
       }
       // 2. Instantly update WebGL scissor region: 0.05ms GPU pass

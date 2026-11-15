@@ -20,7 +20,8 @@ const WebGLGlassRenderer = exports.WebGLGlassRenderer = class WebGLGlassRenderer
       stencil: false,
       preserveDrawingBuffer: false,
       premultipliedAlpha: true,
-      powerPreference: 'high-performance'
+      powerPreference: 'high-performance',
+      desynchronized: true
     };
 
     this.gl =
