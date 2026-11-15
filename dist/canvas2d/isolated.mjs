@@ -13,6 +13,7 @@ import { buildElementLUT } from './lut.mjs';
  * @param {Object} contexts - Stage contexts { stageCtx, blurCtx }
  */
 export function renderIsolatedController(ctrl, rect, { stageCtx, blurCtx }) {
+  if (!ctrl || !ctrl._canvas || !ctrl._ctx || !stageCtx) return;
   const dpr = getDevicePixelRatio(ctrl.options.dpr);
   const w = Math.max(16, Math.round(rect.width * dpr));
   const h = Math.max(16, Math.round(rect.height * dpr));
@@ -29,6 +30,8 @@ export function renderIsolatedController(ctrl, rect, { stageCtx, blurCtx }) {
   }
 
   const lut = ctrl._lut;
+  if (!lut || !lut.offsets) return;
+
   if (ctrl._canvas.width !== w || ctrl._canvas.height !== h) {
     ctrl._canvas.width = w;
     ctrl._canvas.height = h;
@@ -38,8 +41,15 @@ export function renderIsolatedController(ctrl, rect, { stageCtx, blurCtx }) {
   const dx = Math.round(rect.left * dpr);
   const dy = Math.round(rect.top * dpr);
 
-  const sourceCtx = ctrl.options.frosted > 0 ? blurCtx : stageCtx;
-  const srcImg = sourceCtx.getImageData(dx, dy, w, h);
+  const sourceCtx = ctrl.options.frosted > 0 ? (blurCtx || stageCtx) : stageCtx;
+  if (!sourceCtx || !sourceCtx.canvas || sourceCtx.canvas.width === 0 || sourceCtx.canvas.height === 0) return;
+
+  let srcImg;
+  try {
+    srcImg = sourceCtx.getImageData(dx, dy, w, h);
+  } catch {
+    return;
+  }
   const srcData = srcImg.data;
 
   if (!ctrl._lensImg || ctrl._lensImg.width !== w || ctrl._lensImg.height !== h) {

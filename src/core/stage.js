@@ -58,9 +58,9 @@ function ensureStageBuffers(customDpr = 0) {
 
   if (!stageCanvas) {
     stageCanvas = document.createElement('canvas');
-    stageCtx = stageCanvas.getContext('2d');
+    stageCtx = stageCanvas.getContext('2d', { willReadFrequently: true });
     domCacheCanvas = document.createElement('canvas');
-    domCacheCtx = domCacheCanvas.getContext('2d');
+    domCacheCtx = domCacheCanvas.getContext('2d', { willReadFrequently: true });
   }
 
   if (stageCanvas.width !== bufW || stageCanvas.height !== bufH) {
@@ -342,19 +342,11 @@ function renderAllActiveLenses() {
     }
   }
 
-  if (
-    cachedDirectBgCanvas &&
-    Math.abs(cachedDirectBgCanvas.width - bufW) <= 1 &&
-    Math.abs(cachedDirectBgCanvas.height - bufH) <= 1
-  ) {
-    activeSourceCanvas = cachedDirectBgCanvas;
-  }
+  ensureStageBuffers(activeDpr);
 
-  const needsCapture = stageDirty || !stageCanvas || (webglRenderer && !webglRenderer.hasSourceTex);
+  const needsCapture = stageDirty || !stageCanvas || !stageCtx || (webglRenderer && !webglRenderer.hasSourceTex);
   if (needsCapture) {
-    if (activeSourceCanvas === stageCanvas) {
-      captureViewportStage(activeDpr);
-    }
+    captureViewportStage(activeDpr);
     stageDirty = false;
   }
 
@@ -363,7 +355,7 @@ function renderAllActiveLenses() {
   if (maxFrosted > 0 && stageCanvas) {
     if (!blurCanvas) {
       blurCanvas = document.createElement('canvas');
-      blurCtx = blurCanvas.getContext('2d');
+      blurCtx = blurCanvas.getContext('2d', { willReadFrequently: true });
     }
     if (blurCanvas.width !== bufW || blurCanvas.height !== bufH) {
       blurCanvas.width = bufW;
@@ -476,7 +468,7 @@ function renderAllActiveLenses() {
       const primaryCtrl = group[group.length - 1].ctrl;
 
       webglRenderer.render({
-        sourceCanvas: activeSourceCanvas,
+        sourceCanvas: stageCanvas,
         clusters: [
           {
             elements,
