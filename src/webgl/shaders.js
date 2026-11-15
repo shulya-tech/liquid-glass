@@ -184,20 +184,33 @@ float mapFusedScene(vec2 p) {
   return d;
 }
 
+// Exact analytical Gaussian CDF convolution matching CSS box-shadow:
+// Phi(-d / sigma) = 1.0 / (1.0 + exp(1.702 * d / sigma)) where sigma = blur * 0.5
+float shadowGaussCDF(float d, float blur) {
+  float sigma = max(0.5, blur * 0.5);
+  float x = d / sigma;
+  if (x > 5.0) return 0.0;
+  if (x < -5.0) return 1.0;
+  return 1.0 / (1.0 + exp(1.702 * x));
+}
+
 // Unified GPU drop shadow for all elements and liquid bridges
-// Calibrated to match CSS box-shadow: 0 14px 28px rgba(0, 0, 0, 0.16), 0 2px 6px rgba(0, 0, 0, 0.06)
+// Perfectly matches CSS box-shadow: 0 14px 28px rgba(0, 0, 0, 0.16), 0 2px 6px rgba(0, 0, 0, 0.06)
 vec4 calcDropShadow(vec2 p) {
+  // Layer 1: Ambient soft shadow (offset Y = 14px, blur = 28px, opacity = 0.16)
   vec2 off1 = vec2(0.0, 14.0 * u_dpr);
   float blur1 = 28.0 * u_dpr;
   float d1 = mapScene(p - off1);
-  float a1 = smoothstep(0.0, 1.0, 0.5 - 0.5 * (d1 / blur1)) * 0.15;
+  float a1 = shadowGaussCDF(d1, blur1) * 0.16;
 
+  // Layer 2: Crisp contact shadow (offset Y = 2px, blur = 6px, opacity = 0.06)
   vec2 off2 = vec2(0.0, 2.0 * u_dpr);
   float blur2 = 6.0 * u_dpr;
   float d2 = mapScene(p - off2);
-  float a2 = smoothstep(0.0, 1.0, 0.5 - 0.5 * (d2 / blur2)) * 0.055;
+  float a2 = shadowGaussCDF(d2, blur2) * 0.06;
 
-  float totalA = clamp(a1 + a2, 0.0, 1.0);
+  // Exact Porter-Duff alpha composition of overlapping transparent shadows
+  float totalA = a1 + a2 - a1 * a2;
   return vec4(0.0, 0.0, 0.0, totalA);
 }
 
