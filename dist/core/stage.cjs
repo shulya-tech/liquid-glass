@@ -80,6 +80,9 @@ function ensureStageBuffers(customDpr = 0) {
     stageDirty = true;
   }
 
+  // Pre-warm WebGL renderer immediately on stage initialization (eliminates first-touch prolag!)
+  ensureWebGLRenderer(bufW, bufH);
+
   return true;
 }
 
@@ -123,8 +126,11 @@ function getTierSizeWithHysteresis(currentTier, maxDim) {
   return 1024;
 }
 
-function ensureWebGLRenderer(targetTier = 1024) {
+function ensureWebGLRenderer(bufW = 1024, bufH = 1024) {
   if (typeof document === 'undefined') return false;
+
+  const w = bufW || Math.max(1, Math.round((window.innerWidth || 1024) * (window.devicePixelRatio || 1)));
+  const h = bufH || Math.max(1, Math.round((window.innerHeight || 1024) * (window.devicePixelRatio || 1)));
 
   if (!webglCanvas) {
     const canvas = document.createElement('canvas');
@@ -134,20 +140,22 @@ function ensureWebGLRenderer(targetTier = 1024) {
       position: fixed;
       left: 0;
       top: 0;
+      width: 100vw;
+      height: 100vh;
       pointer-events: none;
       display: block;
       visibility: hidden;
-      will-change: transform;
+      z-index: 20;
     `;
-    canvas.width = targetTier;
-    canvas.height = targetTier;
+    canvas.width = w;
+    canvas.height = h;
     document.body.appendChild(canvas);
     webglCanvas = canvas;
   }
 
-  if (webglCanvas.width !== targetTier || webglCanvas.height !== targetTier) {
-    webglCanvas.width = targetTier;
-    webglCanvas.height = targetTier;
+  if (webglCanvas.width !== w || webglCanvas.height !== h) {
+    webglCanvas.width = w;
+    webglCanvas.height = h;
   }
 
   if (!webglRenderer) {
@@ -374,67 +382,40 @@ function renderAllActiveLenses() {
     stageDirty = false;
   }
 
-  // 1. Render isolated lenses directly into their own internal <canvas class="lg-lens-canvas">
-  let blurSourceCtx = stageCtx;
-  if (maxFrosted > 0 && stageCanvas) {
-    if (!blurCanvas) {
-      blurCanvas = document.createElement('canvas');
-      blurCtx = blurCanvas.getContext('2d', { willReadFrequently: true });
+  // 1. Ensure all elements have DOM CSS box-shadow disabled and clear 2D canvases
+  for (let i = 0; i < n; i++) {
+    const item = visible[i];
+    item.ctrl._fused = true;
+    if (item.ctrl._canvas && item.ctrl._canvas.style.visibility !== 'hidden') {
+      item.ctrl._canvas.style.visibility = 'hidden';
     }
-    if (blurCanvas.width !== bufW || blurCanvas.height !== bufH) {
-      blurCanvas.width = bufW;
-      blurCanvas.height = bufH;
-      lastFrostedRadius = -1;
+    if (item.ctrl._ctx && item.ctrl._canvas) {
+      item.ctrl._ctx.clearRect(0, 0, item.ctrl._canvas.width, item.ctrl._canvas.height);
     }
-    const blurRadius = Math.round(maxFrosted * dpr);
-    if (blurRadius !== lastFrostedRadius || needsCapture) {
-      lastFrostedRadius = blurRadius;
-      blurCtx.filter = `blur(${blurRadius}px)`;
-      blurCtx.drawImage(stageCanvas, 0, 0);
-      blurCtx.filter = 'none';
+    if (item.ctrl.element && item.ctrl.element.style.boxShadow !== 'none') {
+      item.ctrl.element.style.boxShadow = 'none';
     }
-    blurSourceCtx = blurCtx;
   }
 
-  for (let i = 0; i < isolated.length; i++) {
-    const { ctrl, rect } = isolated[i];
-    ctrl._fused = false;
-    if (ctrl._canvas && ctrl._canvas.style.visibility !== 'visible') {
-      ctrl._canvas.style.visibility = 'visible';
-    }
-    const targetShadow = ctrl._savedShadow || DEFAULT_SHADOW;
-    if (ctrl.element && ctrl.element.style.boxShadow !== targetShadow) {
-      ctrl.element.style.boxShadow = targetShadow;
-    }
-    renderIsolatedController(ctrl, rect, {
-      stageCtx,
-      blurCtx: blurSourceCtx
-    });
-  }
-
-  // 2. Render fused clusters using the shared WebGL cluster canvas (Dynamic Bounding Box + Fixed GPU Texture)
-  if (fusedGroups.length === 0) {
-    if (webglCanvas && webglCanvas.style.visibility !== 'hidden') {
-      webglCanvas.style.visibility = 'hidden';
+  // 2. 100% Unified WebGL SDF Rendering for all elements and fused clusters
+  if (!ensureWebGLRenderer(bufW, bufH)) {
+    // Fallback to 2D canvas if WebGL context creation failed
+    for (let i = 0; i < isolated.length; i++) {
+      const { ctrl, rect } = isolated[i];
+      if (ctrl._canvas) ctrl._canvas.style.visibility = 'visible';
+      renderIsolatedController(ctrl, rect, { stageCtx, blurCtx: stageCtx });
     }
     return;
   }
 
-  for (const group of fusedGroups) {
-    for (let i = 0; i < group.length; i++) {
-      const item = group[i];
-      item.ctrl._fused = true;
-      if (item.ctrl._canvas && item.ctrl._canvas.style.visibility !== 'hidden') {
-        item.ctrl._canvas.style.visibility = 'hidden';
-      }
-      if (item.ctrl._ctx && item.ctrl._canvas) {
-        item.ctrl._ctx.clearRect(0, 0, item.ctrl._canvas.width, item.ctrl._canvas.height);
-      }
-      if (item.ctrl.element && item.ctrl.element.style.boxShadow !== 'none') {
-        item.ctrl.element.style.boxShadow = 'none';
-      }
-    }
+  if (webglCanvas.style.visibility !== 'visible') {
+    webglCanvas.style.visibility = 'visible';
+  }
 
+  const clusters = [];
+  let primaryOptions = visible[0].ctrl.options;
+
+  for (const group of clusterGroups.values()) {
     let minCssX = Infinity,
       minCssY = Infinity,
       maxCssX = -Infinity,
@@ -452,105 +433,75 @@ function renderAllActiveLenses() {
       if (typeof rimVal === 'number' && rimVal > maxRim) maxRim = rimVal;
     }
 
-    // Measure group inter-element distance for smooth continuous bridge ramp
-    let groupMinDist = Infinity;
-    let groupThresh = DEFAULT_FUSION_DISTANCE;
-    for (let gi = 0; gi < group.length; gi++) {
-      const tI = group[gi].ctrl.options.fusionDistance || DEFAULT_FUSION_DISTANCE;
-      for (let gj = gi + 1; gj < group.length; gj++) {
-        const d = getRectDistance(group[gi].rect, group[gj].rect);
-        if (d < groupMinDist) {
-          groupMinDist = d;
-          groupThresh = Math.max(tI, group[gj].ctrl.options.fusionDistance || DEFAULT_FUSION_DISTANCE);
+    let easedFusionSpan = 0;
+    if (group.length > 1) {
+      let groupMinDist = Infinity;
+      let groupThresh = DEFAULT_FUSION_DISTANCE;
+      for (let gi = 0; gi < group.length; gi++) {
+        const tI = group[gi].ctrl.options.fusionDistance || DEFAULT_FUSION_DISTANCE;
+        for (let gj = gi + 1; gj < group.length; gj++) {
+          const d = getRectDistance(group[gi].rect, group[gj].rect);
+          if (d < groupMinDist) {
+            groupMinDist = d;
+            groupThresh = Math.max(tI, group[gj].ctrl.options.fusionDistance || DEFAULT_FUSION_DISTANCE);
+          }
         }
       }
-    }
 
-    // Continuous dynamic bridge ramp:
-    // Starts at strictly 0 at the threshold boundary and widens continuously as distance closes.
-    // 100% eliminates visual popping or distortion jumps at the contact boundary!
-    const effectiveThresh = groupThresh;
-    const clampedDist = Math.max(0, Math.min(groupMinDist, effectiveThresh));
-    const tRamp = 1.0 - clampedDist / effectiveThresh;
-    const bridgeRamp = tRamp * tRamp * (3.0 - 2.0 * tRamp);
-    const easedFusionSpan = Math.round(groupThresh * bridgeRamp);
+      const effectiveThresh = groupThresh;
+      const clampedDist = Math.max(0, Math.min(groupMinDist, effectiveThresh));
+      const tRamp = 1.0 - clampedDist / effectiveThresh;
+      const bridgeRamp = tRamp * tRamp * (3.0 - 2.0 * tRamp);
+      easedFusionSpan = Math.round(groupThresh * bridgeRamp);
+    }
 
     const cssPad = Math.max(maxRim + 16, 52);
-    const boxCssLeft = Math.max(0, Math.floor(minCssX - cssPad));
-    const boxCssTop = Math.max(0, Math.floor(minCssY - cssPad));
-    const boxCssRight = Math.min(vw, Math.ceil(maxCssX + cssPad));
-    const boxCssBottom = Math.min(vh, Math.ceil(maxCssY + cssPad));
-    const boxCssWidth = Math.max(1, boxCssRight - boxCssLeft);
-    const boxCssHeight = Math.max(1, boxCssBottom - boxCssTop);
+    const scissorX = Math.max(0, Math.floor((minCssX - cssPad) * dpr));
+    const scissorY = Math.max(0, Math.floor(bufH - (maxCssY + cssPad) * dpr));
+    const scissorW = Math.min(bufW - scissorX, Math.ceil((maxCssX - minCssX + 2 * cssPad) * dpr));
+    const scissorH = Math.min(bufH - scissorY, Math.ceil((maxCssY - minCssY + 2 * cssPad) * dpr));
 
-    const clusterW = Math.round(boxCssWidth * dpr);
-    const clusterH = Math.round(boxCssHeight * dpr);
-    const maxDim = Math.max(clusterW, clusterH);
+    const elements = group.map(({ ctrl, rect }) => ({
+      x: rect.left,
+      y: rect.top,
+      w: rect.width,
+      h: rect.height,
+      borderRadius: ctrl._getRadius(),
+      shape: ctrl._getShape(),
+      tint: ctrl._tint,
+      fusion: ctrl.options.fusion,
+      fused: group.length > 1
+    }));
 
-    const targetTier = getTierSizeWithHysteresis(activeClusterTier, maxDim);
-    activeClusterTier = targetTier;
+    const primaryCtrl = group[group.length - 1].ctrl;
+    primaryOptions = primaryCtrl.options;
 
-    if (ensureWebGLRenderer(targetTier)) {
-      if (webglCanvas.style.visibility !== 'visible') {
-        webglCanvas.style.visibility = 'visible';
-      }
-      const tierCssW = `${targetTier / dpr}px`;
-      const tierCssH = `${targetTier / dpr}px`;
-      if (webglCanvas.style.width !== tierCssW) webglCanvas.style.width = tierCssW;
-      if (webglCanvas.style.height !== tierCssH) webglCanvas.style.height = tierCssH;
-      webglCanvas.style.transform = `translate3d(${boxCssLeft}px, ${boxCssTop}px, 0)`;
-
-      const clusterZ = String(group[0].ctrl._cachedZIndex || 20);
-      if (webglCanvas.style.zIndex !== clusterZ) {
-        webglCanvas.style.zIndex = clusterZ;
-      }
-
-      const scissorX = 0;
-      const scissorY = Math.max(0, targetTier - clusterH);
-      const scissorW = Math.min(targetTier, clusterW);
-      const scissorH = Math.min(targetTier, clusterH);
-
-      const elements = group.map(({ ctrl, rect }) => ({
-        x: rect.left,
-        y: rect.top,
-        w: rect.width,
-        h: rect.height,
-        borderRadius: ctrl._getRadius(),
-        shape: ctrl._getShape(),
-        tint: ctrl._tint,
-        fusion: ctrl.options.fusion,
-        fused: true
-      }));
-
-      const primaryCtrl = group[group.length - 1].ctrl;
-
-      webglRenderer.render({
-        sourceCanvas: stageCanvas,
-        clusters: [
-          {
-            elements,
-            hasFused: true,
-            options: {
-              ...primaryCtrl.options,
-              fusionDistance: easedFusionSpan
-            },
-            areaOriginX: Math.round(boxCssLeft * dpr),
-            areaOriginY: Math.round(boxCssTop * dpr),
-            scissorX,
-            scissorY,
-            scissorW,
-            scissorH
-          }
-        ],
-        options: {
-          ...primaryCtrl.options,
-          frosted: maxFrosted
-        },
-        dpr,
-        sourceCanvasDirty: needsCapture
-      });
-    }
+    clusters.push({
+      elements,
+      hasFused: group.length > 1,
+      options: {
+        ...primaryCtrl.options,
+        fusionDistance: easedFusionSpan
+      },
+      areaOriginX: 0,
+      areaOriginY: 0,
+      scissorX,
+      scissorY,
+      scissorW,
+      scissorH
+    });
   }
+
+  webglRenderer.render({
+    sourceCanvas: stageCanvas,
+    clusters,
+    options: {
+      ...primaryOptions,
+      frosted: maxFrosted
+    },
+    dpr,
+    sourceCanvasDirty: needsCapture
+  });
 }
 
 exports.scheduleStageRedraw = function scheduleStageRedraw(dirty = false) {

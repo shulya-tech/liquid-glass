@@ -84,12 +84,10 @@ const LiquidGlassController = exports.LiquidGlassController = class LiquidGlassC
     this.element.style.backgroundColor = 'transparent';
 
     const existingShadow = this.element.style.boxShadow || computed.boxShadow;
-    if (!existingShadow || existingShadow === 'none') {
-      this._savedShadow = DEFAULT_SHADOW;
-      this.element.style.boxShadow = DEFAULT_SHADOW;
-    } else {
-      this._savedShadow = existingShadow;
-    }
+    this._savedShadow = existingShadow || 'none';
+    // In unified WebGL SDF shadow architecture, the GPU renders the exact Gaussian drop shadow
+    // for all elements (both isolated and merged) seamlessly. DOM CSS box-shadow is always disabled.
+    this.element.style.boxShadow = 'none';
 
     const canvas = document.createElement('canvas');
     canvas.className = 'lg-lens-canvas';
