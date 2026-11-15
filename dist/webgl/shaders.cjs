@@ -216,13 +216,6 @@ void main() {
 
   float d = mapScene(p);
   if (d > 0.5) {
-    if (d < 44.0 * u_dpr) {
-      vec4 shadow = calcDropShadow(p);
-      if (shadow.a > 0.001) {
-        gl_FragColor = shadow;
-        return;
-      }
-    }
     gl_FragColor = vec4(0.0);
     return;
   }
@@ -266,16 +259,10 @@ void main() {
     norm = gradLen > 0.0001 ? grad / gradLen : vec2(0.0);
 
     // Physical Snell refraction with empirical calibration curve (_T0):
-    // Smoothly soft-clamps maximum edge amplitude to 0.48 * rim, guaranteeing
-    // |d(shift)/ds| < 0.83 so the background coordinate mapping is strictly monotonic.
-    // Completely eliminates caustic inversion, upside-down flipped text, and horizontal banding,
-    // while preserving 100% of the rich convex bevel refraction and liquid glass feel!
-    float rawAmp = 2.8 * max(0.0, u_ior - 1.0) * max(0.0, u_height);
-    float maxAmp = u_rim * 0.48;
-    float amp = (maxAmp > 0.001 && rawAmp > 0.001)
-      ? maxAmp * (rawAmp / sqrt(maxAmp * maxAmp + rawAmp * rawAmp))
-      : 0.0;
-    float shift = (gain / 2.8) * amp;
+    // Full optical distortion power matching Apple Liquid Glass convex bevel.
+    float maxShift = u_rim * 1.25;
+    float rawShift = gain * (u_ior - 1.0) * u_height;
+    float shift = clamp(rawShift, -maxShift, maxShift);
     offset = -norm * slopeFactor * shift;
 
     if (norm.y < -0.2) {

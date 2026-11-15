@@ -180,12 +180,7 @@ exports.renderFusedCluster = function renderFusedCluster(ctx, sourceCtx, element
     }
   }
 
-  const rawAmp = 2.8 * Math.max(0, ior - 1.0) * Math.max(0, heightPx);
-  const maxAmp = rimPx * 0.48;
-  const amp =
-    maxAmp > 0.001 && rawAmp > 0.001
-      ? maxAmp * (rawAmp / Math.sqrt(maxAmp * maxAmp + rawAmp * rawAmp))
-      : 0;
+  const maxShift = rimPx * 1.25;
 
   // Pass 2: Fast vectorized lookup from distGrid + tabular chromatic shift (_T4)
   for (let y = 1; y < boxH - 1; y++) {
@@ -220,7 +215,8 @@ exports.renderFusedCluster = function renderFusedCluster(ctx, sourceCtx, element
           const gx = dx * invLen;
           const gy = dy * invLen;
 
-          const shift = (gain / 2.8) * amp;
+          const rawShift = gain * (ior - 1.0) * heightPx;
+          const shift = Math.min(maxShift, rawShift);
           offX = Math.round(-gx * shift);
           offY = Math.round(-gy * shift);
 
