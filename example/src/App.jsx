@@ -422,28 +422,14 @@ export default function App() {
     window.addEventListener('resize', handleResize);
 
     let lastBgTime = 0;
-    let dragPausedTime = 0;
-    let dragStartTime = 0;
-
-    // Ambient background loop: idle 30 FPS updates with zero drag interference
+    // Ambient background loop: continuous smooth updates without freezing on drag
     const loop = (timestamp) => {
-      const isDragging = Boolean(dragState.current);
-      if (isDragging) {
-        if (!dragStartTime) dragStartTime = timestamp;
-      } else {
-        if (dragStartTime) {
-          dragPausedTime += (timestamp - dragStartTime);
-          dragStartTime = 0;
-        }
-        const effectiveTime = timestamp - dragPausedTime;
-        const bgInterval = 1000 / 30;
-        if (timestamp - lastBgTime >= bgInterval) {
-          lastBgTime = timestamp;
-          drawStageBackground(canvas, dprRef.current, effectiveTime);
-          redrawStageNow(true);
-        }
+      const bgInterval = 1000 / 30;
+      if (timestamp - lastBgTime >= bgInterval) {
+        lastBgTime = timestamp;
+        drawStageBackground(canvas, dprRef.current, timestamp);
+        redrawStageNow(true);
       }
-
       animId = requestAnimationFrame(loop);
     };
     animId = requestAnimationFrame(loop);
@@ -526,6 +512,10 @@ export default function App() {
       if (target) {
         target.x = currentX;
         target.y = currentY;
+      }
+      const el = shapeDomRefs.current[id];
+      if (el && el._lgController && typeof el._lgController.clearManualPosition === 'function') {
+        el._lgController.clearManualPosition();
       }
     };
 

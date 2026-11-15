@@ -402,6 +402,16 @@ function renderAllActiveLenses() {
         if (webglCanvas.style.display !== 'block') {
           webglCanvas.style.display = 'block';
         }
+        let maxZ = 20;
+        for (let i = 0; i < visible.length; i++) {
+          const z = visible[i].ctrl._cachedZIndex || 20;
+          if (z > maxZ) maxZ = z;
+        }
+        const targetZ = Math.max(1, maxZ - 1);
+        const targetZStr = String(targetZ);
+        if (webglCanvas.style.zIndex !== targetZStr) {
+          webglCanvas.style.zIndex = targetZStr;
+        }
       }
       return;
     } catch (e) {
@@ -450,14 +460,16 @@ exports.attachGlobalStageListeners = function attachGlobalStageListeners() {
 
   let scrollRestTimer = null;
   const onScroll = () => {
-    scheduleStageRedraw(false);
+    domCacheDirty = true;
+    stageDirty = true;
+    scheduleStageRedraw(true);
 
     if (scrollRestTimer) clearTimeout(scrollRestTimer);
     scrollRestTimer = setTimeout(() => {
       domCacheDirty = true;
       stageDirty = true;
       scheduleStageRedraw(true);
-    }, 150);
+    }, 120);
   };
 
   const onResize = () => {
@@ -469,4 +481,19 @@ exports.attachGlobalStageListeners = function attachGlobalStageListeners() {
 
   window.addEventListener('scroll', onScroll, { passive: true });
   window.addEventListener('resize', onResize, { passive: true });
+
+  // Ambient continuous tick for live background canvases (e.g. ShulhinManifoldBackground)
+  // Ensures living particles in the header keep floating smoothly at the top of the page without freezing!
+  let lastAmbientTime = 0;
+  const ambientTick = (timestamp) => {
+    if (controllerRegistry.size > 0 && hasLiveBackgroundCanvas()) {
+      if (timestamp - lastAmbientTime >= 33) {
+        lastAmbientTime = timestamp;
+        stageDirty = true;
+        scheduleStageRedraw(true);
+      }
+    }
+    window.requestAnimationFrame(ambientTick);
+  };
+  window.requestAnimationFrame(ambientTick);
 }

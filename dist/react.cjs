@@ -32,6 +32,7 @@ exports.useLiquidGlass = function useLiquidGlass(options = {}) {
         frosted: options.frosted,
         fusion: options.fusion,
         fusionDistance: options.fusionDistance,
+        zIndex: options.zIndex,
         enabled: options.enabled,
         dpr: options.dpr
       });
@@ -43,6 +44,7 @@ exports.useLiquidGlass = function useLiquidGlass(options = {}) {
     options.frosted,
     options.fusion,
     options.fusionDistance,
+    options.zIndex,
     options.enabled,
     options.dpr
   ]);
@@ -61,6 +63,7 @@ const LiquidGlass = exports.LiquidGlass = forwardRef(function LiquidGlass(
     frosted = OPTICAL_DEFAULTS.frosted,
     fusion = OPTICAL_DEFAULTS.fusion,
     fusionDistance,
+    zIndex,
     enabled = true,
     dpr = OPTICAL_DEFAULTS.dpr,
     as: Component = 'div',
@@ -78,6 +81,7 @@ const LiquidGlass = exports.LiquidGlass = forwardRef(function LiquidGlass(
     frosted,
     fusion,
     fusionDistance,
+    zIndex,
     enabled,
     dpr
   });

@@ -42,6 +42,11 @@ export interface LiquidGlassOptions {
   dpr?: number;
 
   /**
+   * Optional explicit z-index for stage stacking ordering
+   */
+  zIndex?: number;
+
+  /**
    * Optional border radius override in pixels
    */
   borderRadius?: number | null;

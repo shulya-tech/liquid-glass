@@ -35,14 +35,23 @@ export class LiquidGlassController {
     if (this.options && typeof this.options.zIndex === 'number') {
       return this.options.zIndex;
     }
-    const attrZ = parseInt(this.element.getAttribute('data-lg-z-index'), 10);
-    if (!isNaN(attrZ)) return attrZ;
+    const directAttrZ = parseInt(this.element.getAttribute('data-lg-z-index'), 10);
+    if (!isNaN(directAttrZ)) return directAttrZ;
 
-    const inlineZ = parseInt(this.element.style.zIndex, 10);
-    if (!isNaN(inlineZ) && inlineZ > 0) return inlineZ;
+    // Fast check: inspect inline styles and attributes up the tree (0ms, no style recalc!)
+    let curr = this.element;
+    while (curr && curr !== document.body && curr !== document.documentElement) {
+      if (curr.getAttribute) {
+        const attrZ = parseInt(curr.getAttribute('data-lg-z-index'), 10);
+        if (!isNaN(attrZ)) return attrZ;
+      }
+      const inlineZ = curr.style && curr.style.zIndex ? parseInt(curr.style.zIndex, 10) : NaN;
+      if (!isNaN(inlineZ) && inlineZ > 0) return inlineZ;
+      curr = curr.parentElement;
+    }
 
-    const computed = window.getComputedStyle(this.element);
-    const compZ = parseInt(computed.zIndex, 10);
+    if (this._cachedZIndex !== undefined) return this._cachedZIndex;
+    const compZ = parseInt(window.getComputedStyle(this.element).zIndex, 10);
     if (!isNaN(compZ) && compZ > 0) return compZ;
 
     return 20;
@@ -105,7 +114,7 @@ export class LiquidGlassController {
       });
       this._mo.observe(this.element, {
         attributes: true,
-        attributeFilter: ['data-lg-tint', 'data-lg-z-index', 'class']
+        attributeFilter: ['data-lg-tint', 'data-lg-z-index', 'data-lg-shape', 'class']
       });
     }
 
@@ -114,23 +123,24 @@ export class LiquidGlassController {
   }
 
   getRect() {
-    if (!this._rect || this._rectDirty) {
-      if (!this.element) return null;
-      const domRect = this.element.getBoundingClientRect();
-      this._rect = {
-        left: domRect.left,
-        top: domRect.top,
-        width: domRect.width,
-        height: domRect.height,
-        right: domRect.right,
-        bottom: domRect.bottom
-      };
-      this._rectDirty = false;
+    if (this._isManualPos && this._rect) {
+      return this._rect;
     }
+    if (!this.element) return null;
+    const domRect = this.element.getBoundingClientRect();
+    this._rect = {
+      left: domRect.left,
+      top: domRect.top,
+      width: domRect.width,
+      height: domRect.height,
+      right: domRect.right,
+      bottom: domRect.bottom
+    };
     return this._rect;
   }
 
   setRectPosition(x, y) {
+    this._isManualPos = true;
     if (!this._rect) {
       this.getRect();
     }
@@ -140,6 +150,10 @@ export class LiquidGlassController {
       this._rect.right = x + this._rect.width;
       this._rect.bottom = y + this._rect.height;
     }
+  }
+
+  clearManualPosition() {
+    this._isManualPos = false;
   }
 
   setZIndex(z) {
@@ -199,6 +213,12 @@ export class LiquidGlassController {
       changed = true;
     }
 
+    if (newOptions.zIndex !== undefined && newOptions.zIndex !== this.options.zIndex) {
+      this.options.zIndex = newOptions.zIndex;
+      this._cachedZIndex = this._computeZIndex();
+      changed = true;
+    }
+
     for (const key of ['rim', 'ior', 'height', 'frosted', 'fusion', 'fusionDistance', 'dpr']) {
       if (merged[key] !== this.options[key]) {
         this.options[key] = merged[key];
@@ -213,12 +233,17 @@ export class LiquidGlassController {
       this._lut = null;
     }
     this._cachedZIndex = this._computeZIndex();
+    this._rectDirty = true;
+    this._cachedRadius = undefined;
     if (changed) {
       scheduleStageRedraw(true);
     }
   }
 
   refresh() {
+    this._rectDirty = true;
+    this._cachedRadius = undefined;
+    this._cachedZIndex = this._computeZIndex();
     scheduleStageRedraw(true);
   }
 
