@@ -460,12 +460,14 @@ exports.attachGlobalStageListeners = function attachGlobalStageListeners() {
 
   let scrollRestTimer = null;
   const onScroll = () => {
+    for (const ctrl of controllerRegistry) ctrl.invalidateRect();
     domCacheDirty = true;
     stageDirty = true;
     scheduleStageRedraw(true);
 
     if (scrollRestTimer) clearTimeout(scrollRestTimer);
     scrollRestTimer = setTimeout(() => {
+      for (const ctrl of controllerRegistry) ctrl.invalidateRect();
       domCacheDirty = true;
       stageDirty = true;
       scheduleStageRedraw(true);
@@ -473,6 +475,7 @@ exports.attachGlobalStageListeners = function attachGlobalStageListeners() {
   };
 
   const onResize = () => {
+    for (const ctrl of controllerRegistry) ctrl.invalidateRect();
     cachedBodyBg = '';
     domCacheDirty = true;
     stageDirty = true;

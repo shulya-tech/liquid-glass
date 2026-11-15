@@ -124,6 +124,9 @@ const LiquidGlassController = exports.LiquidGlassController = class LiquidGlassC
     if (this._isManualPos && this._rect) {
       return this._rect;
     }
+    if (this._rect && !this._rectDirty) {
+      return this._rect;
+    }
     if (!this.element) return null;
     const domRect = this.element.getBoundingClientRect();
     this._rect = {
@@ -134,7 +137,14 @@ const LiquidGlassController = exports.LiquidGlassController = class LiquidGlassC
       right: domRect.right,
       bottom: domRect.bottom
     };
+    this._rectDirty = false;
     return this._rect;
+  }
+
+  invalidateRect() {
+    if (!this._isManualPos) {
+      this._rectDirty = true;
+    }
   }
 
   setRectPosition(x, y) {
@@ -152,6 +162,7 @@ const LiquidGlassController = exports.LiquidGlassController = class LiquidGlassC
 
   clearManualPosition() {
     this._isManualPos = false;
+    this._rectDirty = true;
   }
 
   setZIndex(z) {

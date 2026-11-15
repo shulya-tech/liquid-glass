@@ -213,7 +213,8 @@ exports.renderFusedCluster = function renderFusedCluster(ctx, sourceCtx, element
           const gx = dx * invLen;
           const gy = dy * invLen;
 
-          const shift = gain * (ior - 1.0) * heightPx;
+          const maxShift = rimPx * 0.72;
+          const shift = Math.max(-maxShift, Math.min(maxShift, gain * (ior - 1.0) * heightPx));
           offX = Math.round(-gx * shift);
           offY = Math.round(-gy * shift);
 

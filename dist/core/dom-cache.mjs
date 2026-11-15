@@ -302,8 +302,8 @@ export function paintDomSurfaces(ctx, dpr, vw, bw, bh, minY, maxY, originY, clus
           if (lr.bottom < minY || lr.top > maxScanY) continue;
 
           if (isGradient) {
-            const gradLeft = parentRect.left;
-            const gradRight = parentRect.right > gradLeft ? parentRect.right : (lr.right || gradLeft + 100);
+            const gradLeft = lr.left;
+            const gradRight = lr.right > lr.left ? lr.right : (lr.left + 100);
             const grad = domCacheCtx.createLinearGradient(gradLeft, lr.top, gradRight, lr.top);
             grad.addColorStop(0, '#fb923c');
             grad.addColorStop(0.5, '#ec4899');

@@ -72,7 +72,8 @@ exports.buildElementLUT = function buildElementLUT(w, h, rad, rawOptions = {}, d
           const gx = dx / len;
           const gy = dy / len;
 
-          const shift = gain * (ior - 1.0) * heightPx;
+          const maxShift = rimPx * 0.72;
+          const shift = Math.max(-maxShift, Math.min(maxShift, gain * (ior - 1.0) * heightPx));
           offsets[idx * 2] = Math.round(-gx * shift);
           offsets[idx * 2 + 1] = Math.round(-gy * shift);
 

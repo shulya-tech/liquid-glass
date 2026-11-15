@@ -261,7 +261,8 @@ void main() {
     slopeFactor = clamp(gradLen, 0.0, 1.0);
     norm = gradLen > 0.0001 ? grad / gradLen : vec2(0.0);
 
-    float shift = gain * (u_ior - 1.0) * u_height;
+    float maxShift = u_rim * 0.72;
+    float shift = clamp(gain * (u_ior - 1.0) * u_height, -maxShift, maxShift);
     offset = -norm * slopeFactor * shift;
 
     if (norm.y < -0.2) {
