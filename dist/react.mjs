@@ -30,6 +30,7 @@ export function useLiquidGlass(options = {}) {
         height: options.height,
         frosted: options.frosted,
         fusion: options.fusion,
+        fusionDistance: options.fusionDistance,
         enabled: options.enabled,
         dpr: options.dpr
       });
@@ -40,6 +41,7 @@ export function useLiquidGlass(options = {}) {
     options.height,
     options.frosted,
     options.fusion,
+    options.fusionDistance,
     options.enabled,
     options.dpr
   ]);
@@ -57,6 +59,7 @@ export const LiquidGlass = forwardRef(function LiquidGlass(
     height = OPTICAL_DEFAULTS.height,
     frosted = OPTICAL_DEFAULTS.frosted,
     fusion = OPTICAL_DEFAULTS.fusion,
+    fusionDistance,
     enabled = true,
     dpr = OPTICAL_DEFAULTS.dpr,
     as: Component = 'div',
@@ -73,6 +76,7 @@ export const LiquidGlass = forwardRef(function LiquidGlass(
     height,
     frosted,
     fusion,
+    fusionDistance,
     enabled,
     dpr
   });
@@ -106,6 +110,7 @@ export {
   OPTICAL_DEFAULTS,
   OPTICAL_LIMITS,
   scheduleStageRedraw,
+  redrawStageNow,
   setUseWebGL,
   isWebGLActive
 } from './core.mjs';

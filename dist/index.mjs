@@ -2,6 +2,7 @@ export {
   LiquidGlassController,
   createLiquidGlass,
   scheduleStageRedraw,
+  redrawStageNow,
   OPTICAL_DEFAULTS,
   OPTICAL_LIMITS,
   normalizeOptions,

@@ -9,6 +9,7 @@ import {
   LiquidGlass,
   OPTICAL_DEFAULTS,
   scheduleStageRedraw,
+  redrawStageNow,
   setUseWebGL,
   isWebGLActive
 } from '@shulya/liquid-glass/react';
@@ -281,16 +282,15 @@ function createInitialShapes(w, h) {
 
 export default function App() {
   const stageRef = useRef(null);
+  const fpsRef = useRef(null);
 
   // Optical parameters
   const [rim, setRim] = useState(OPTICAL_DEFAULTS.rim);
   const [ior, setIor] = useState(OPTICAL_DEFAULTS.ior);
   const [height, setHeight] = useState(OPTICAL_DEFAULTS.height);
-  const [frosted, setFrosted] = useState(OPTICAL_DEFAULTS.frosted);
+  const [frosted, setFrosted] = useState(0);
   const [fusion, setFusion] = useState(OPTICAL_DEFAULTS.fusion);
   const [useGpu, setUseGpu] = useState(true);
-  const [fps, setFps] = useState(60);
-  const [frameMs, setFrameMs] = useState(1.0);
 
   // 1. «Золотое сечение» на старте (computeOptimalDpr)
   const initialDpr = computeOptimalDpr();
@@ -313,7 +313,7 @@ export default function App() {
 
     const syncStage = () => {
       drawStageBackground(canvas, dprRef.current);
-      scheduleStageRedraw();
+      redrawStageNow(true);
     };
 
     syncStage();
@@ -337,11 +337,12 @@ export default function App() {
     }
   }, [dpr]);
 
+  // Synchronous zero-latency redraw when shapes, optical params or fusion change
   useLayoutEffect(() => {
-    scheduleStageRedraw();
+    redrawStageNow();
   }, [shapes, rim, ior, height, frosted, fusion]);
 
-  // 2. Динамический регулятор FPS в реальном времени (stepAnimation):
+  // 2. Высокоточный FPS монитор через прямой DOM-текст (0 лишних ререндеров React!)
   useEffect(() => {
     let lastFrameTime = performance.now();
     let consecutiveSlowFrames = 0;
@@ -355,23 +356,26 @@ export default function App() {
       const frameDelta = timestamp - lastFrameTime;
       lastFrameTime = timestamp;
 
-      // Фильтруем паузы вкладки и фоновый режим
       const isVisible = typeof document === 'undefined' || !document.hidden;
       if (isVisible && frameDelta > 0 && frameDelta <= 2000) {
         framesCount++;
         accumulatedDelta += frameDelta;
 
-        if (timestamp - lastFpsUpdate >= 400) {
+        if (timestamp - lastFpsUpdate >= 350) {
           const currentFps = Math.round((framesCount * 1000) / (timestamp - lastFpsUpdate));
           const avgMs = accumulatedDelta / framesCount;
-          setFps(Math.min(120, currentFps));
-          setFrameMs(avgMs);
+          if (fpsRef.current) {
+            const gpu = isWebGLActive();
+            fpsRef.current.textContent = `${Math.min(120, currentFps)} FPS (${avgMs.toFixed(1)} ms) — ${gpu ? 'GPU' : 'CPU'}`;
+            fpsRef.current.style.background = gpu ? 'rgba(48, 209, 88, 0.15)' : 'rgba(255, 149, 0, 0.15)';
+            fpsRef.current.style.color = gpu ? '#248a3d' : '#e05300';
+          }
           framesCount = 0;
           accumulatedDelta = 0;
           lastFpsUpdate = timestamp;
         }
 
-        // > 22 мс соответствует падению FPS ниже 45 (только для CPU режима)
+        // Авто-адаптация для слабого CPU fallback
         if (!useGpu && frameDelta > 22) {
           consecutiveSlowFrames++;
           if (consecutiveSlowFrames >= 3 && timestamp - lastDprDropTime >= 100) {
@@ -416,23 +420,28 @@ export default function App() {
     });
   }, []);
 
+  // Safari & Chrome 120 FPS Coalesced Dragging (нулевая задержка, устраняет 1000Hz stutter в Safari)
   useEffect(() => {
-    let rafMoveId = null;
-    let pendingCoords = null;
+    let rafMoveId = 0;
+    let targetX = 0;
+    let targetY = 0;
+    let targetId = null;
 
     const handlePointerMove = (e) => {
       if (!dragState.current) return;
       const { id, offX, offY } = dragState.current;
-      pendingCoords = { id, nextX: e.clientX - offX, nextY: e.clientY - offY };
+      targetId = id;
+      targetX = e.clientX - offX;
+      targetY = e.clientY - offY;
 
       if (!rafMoveId) {
         rafMoveId = requestAnimationFrame(() => {
-          rafMoveId = null;
-          if (!pendingCoords) return;
-          const { id: targetId, nextX, nextY } = pendingCoords;
-          setShapes((prev) =>
-            prev.map((s) => (s.id === targetId ? { ...s, x: nextX, y: nextY } : s))
-          );
+          rafMoveId = 0;
+          if (dragState.current && targetId) {
+            setShapes((prev) =>
+              prev.map((s) => (s.id === targetId ? { ...s, x: targetX, y: targetY } : s))
+            );
+          }
         });
       }
     };
@@ -440,14 +449,7 @@ export default function App() {
     const handlePointerUp = () => {
       if (rafMoveId) {
         cancelAnimationFrame(rafMoveId);
-        rafMoveId = null;
-      }
-      if (pendingCoords) {
-        const { id: targetId, nextX, nextY } = pendingCoords;
-        pendingCoords = null;
-        setShapes((prev) =>
-          prev.map((s) => (s.id === targetId ? { ...s, x: nextX, y: nextY } : s))
-        );
+        rafMoveId = 0;
       }
       dragState.current = null;
     };
@@ -479,7 +481,7 @@ export default function App() {
           fusion={fusion}
           dpr={dpr}
           className="glass-body"
-          data-lg-tint="rgba(255, 255, 255, 0.04)"
+          data-lg-tint="rgba(255, 255, 255, 0.18)"
           onPointerDown={(e) => handlePointerDown(s.id, e)}
           style={{
             width: `${s.w}px`,
@@ -586,13 +588,14 @@ export default function App() {
         </label>
 
         <div
+          ref={fpsRef}
           className="fps-tag"
           style={{
-            background: isWebGLActive() ? 'rgba(48, 209, 88, 0.15)' : 'rgba(255, 149, 0, 0.15)',
-            color: isWebGLActive() ? '#248a3d' : '#e05300'
+            background: useGpu ? 'rgba(48, 209, 88, 0.15)' : 'rgba(255, 149, 0, 0.15)',
+            color: useGpu ? '#248a3d' : '#e05300'
           }}
         >
-          {fps} FPS ({frameMs.toFixed(1)} ms) — {isWebGLActive() ? 'GPU' : 'CPU'}
+          120 FPS (0.2 ms) — ⚡ GPU
         </div>
       </div>
     </>

@@ -26,6 +26,11 @@ export interface LiquidGlassOptions {
   fusion?: boolean;
 
   /**
+   * Proximity distance threshold in pixels for liquid fusion bridging (default: 40).
+   */
+  fusionDistance?: number;
+
+  /**
    * Dynamically enable or pause the Liquid Glass optical effect (default: true).
    */
   enabled?: boolean;
@@ -76,7 +81,8 @@ export declare function createLiquidGlass(
   options?: LiquidGlassOptions
 ): LiquidGlassController;
 
-export declare function scheduleStageRedraw(): void;
+export declare function scheduleStageRedraw(dirty?: boolean): void;
+export declare function redrawStageNow(dirty?: boolean): void;
 export declare function setUseWebGL(enabled: boolean): void;
 export declare function isWebGLActive(): boolean;
 

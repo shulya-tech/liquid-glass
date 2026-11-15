@@ -9,6 +9,9 @@
 
 import { _T0, _T1, _T2, _T4 } from './tables.js';
 
+// Fusion span (CSS px). Quadratic smin bridges two bodies once their gap < span.
+export const DEFAULT_FUSION_DISTANCE = 88;
+
 const VS_SOURCE = `
 attribute vec2 a_pos;
 varying vec2 v_uv;
@@ -86,17 +89,19 @@ uniform float u_rim;        // rim width in physical pixels
 uniform float u_ior;        // index of refraction
 uniform float u_height;     // glass height/thickness in physical pixels
 uniform float u_fusionSpan; // fusion distance in physical pixels
-uniform int u_count;        // number of glass elements (0..8)
+uniform float u_count;      // number of glass elements (0..8)
+uniform float u_dpr;        // device pixel ratio
+uniform float u_hasFusedElements; // 1.0 = at least two elements are fused
 
 // 8 Unrolled Element Uniforms (Mobile GLSL ES 1.00 compliant)
-uniform vec4 u_rect0; uniform float u_rad0; uniform vec4 u_tint0; uniform float u_shape0;
-uniform vec4 u_rect1; uniform float u_rad1; uniform vec4 u_tint1; uniform float u_shape1;
-uniform vec4 u_rect2; uniform float u_rad2; uniform vec4 u_tint2; uniform float u_shape2;
-uniform vec4 u_rect3; uniform float u_rad3; uniform vec4 u_tint3; uniform float u_shape3;
-uniform vec4 u_rect4; uniform float u_rad4; uniform vec4 u_tint4; uniform float u_shape4;
-uniform vec4 u_rect5; uniform float u_rad5; uniform vec4 u_tint5; uniform float u_shape5;
-uniform vec4 u_rect6; uniform float u_rad6; uniform vec4 u_tint6; uniform float u_shape6;
-uniform vec4 u_rect7; uniform float u_rad7; uniform vec4 u_tint7; uniform float u_shape7;
+uniform vec4 u_rect0; uniform float u_rad0; uniform vec4 u_tint0; uniform float u_shape0; uniform float u_fused0;
+uniform vec4 u_rect1; uniform float u_rad1; uniform vec4 u_tint1; uniform float u_shape1; uniform float u_fused1;
+uniform vec4 u_rect2; uniform float u_rad2; uniform vec4 u_tint2; uniform float u_shape2; uniform float u_fused2;
+uniform vec4 u_rect3; uniform float u_rad3; uniform vec4 u_tint3; uniform float u_shape3; uniform float u_fused3;
+uniform vec4 u_rect4; uniform float u_rad4; uniform vec4 u_tint4; uniform float u_shape4; uniform float u_fused4;
+uniform vec4 u_rect5; uniform float u_rad5; uniform vec4 u_tint5; uniform float u_shape5; uniform float u_fused5;
+uniform vec4 u_rect6; uniform float u_rad6; uniform vec4 u_tint6; uniform float u_shape6; uniform float u_fused6;
+uniform vec4 u_rect7; uniform float u_rad7; uniform vec4 u_tint7; uniform float u_shape7; uniform float u_fused7;
 
 // Inigo Quilez 2D Rounded Box SDF with radius clamping
 float sdRoundedBox(vec2 p, vec2 b, float r) {
@@ -115,7 +120,8 @@ float evalElement(vec2 p, vec4 rect, float rad, float isCircle) {
   return sdRoundedBox(rel, halfSize, rad);
 }
 
-// Empirical _T3 Bridge Blend: guarantees d <= min(d1, d2) so shapes never erode or tear holes
+// Quadratic smooth minimum: gives natural organic liquid attraction starting from distance < span.
+// Strictly guarantees d <= min(d1, d2) so shapes never erode or tear holes.
 float blendSurfaces(float d1, float d2, float span) {
   if (span <= 0.001) return min(d1, d2);
   float diff = abs(d1 - d2);
@@ -125,22 +131,85 @@ float blendSurfaces(float d1, float d2, float span) {
 }
 
 float mapScene(vec2 p) {
-  if (u_count <= 0) return 9999.0;
+  if (u_count <= 0.5) return 9999.0;
   float d = evalElement(p, u_rect0, u_rad0, u_shape0);
-  if (u_count > 1) d = blendSurfaces(d, evalElement(p, u_rect1, u_rad1, u_shape1), u_fusionSpan);
-  if (u_count > 2) d = blendSurfaces(d, evalElement(p, u_rect2, u_rad2, u_shape2), u_fusionSpan);
-  if (u_count > 3) d = blendSurfaces(d, evalElement(p, u_rect3, u_rad3, u_shape3), u_fusionSpan);
-  if (u_count > 4) d = blendSurfaces(d, evalElement(p, u_rect4, u_rad4, u_shape4), u_fusionSpan);
-  if (u_count > 5) d = blendSurfaces(d, evalElement(p, u_rect5, u_rad5, u_shape5), u_fusionSpan);
-  if (u_count > 6) d = blendSurfaces(d, evalElement(p, u_rect6, u_rad6, u_shape6), u_fusionSpan);
-  if (u_count > 7) d = blendSurfaces(d, evalElement(p, u_rect7, u_rad7, u_shape7), u_fusionSpan);
+  if (u_count > 1.5) d = blendSurfaces(d, evalElement(p, u_rect1, u_rad1, u_shape1), u_fusionSpan);
+  if (u_count > 2.5) d = blendSurfaces(d, evalElement(p, u_rect2, u_rad2, u_shape2), u_fusionSpan);
+  if (u_count > 3.5) d = blendSurfaces(d, evalElement(p, u_rect3, u_rad3, u_shape3), u_fusionSpan);
+  if (u_count > 4.5) d = blendSurfaces(d, evalElement(p, u_rect4, u_rad4, u_shape4), u_fusionSpan);
+  if (u_count > 5.5) d = blendSurfaces(d, evalElement(p, u_rect5, u_rad5, u_shape5), u_fusionSpan);
+  if (u_count > 6.5) d = blendSurfaces(d, evalElement(p, u_rect6, u_rad6, u_shape6), u_fusionSpan);
+  if (u_count > 7.5) d = blendSurfaces(d, evalElement(p, u_rect7, u_rad7, u_shape7), u_fusionSpan);
   return d;
 }
 
+// Distance field evaluated ONLY for elements that are currently coalescing/fused
+float mapFusedScene(vec2 p) {
+  float d = 9999.0;
+  bool first = true;
+  if (u_count > 0.5 && u_fused0 > 0.5) {
+    d = evalElement(p, u_rect0, u_rad0, u_shape0);
+    first = false;
+  }
+  if (u_count > 1.5 && u_fused1 > 0.5) {
+    float d1 = evalElement(p, u_rect1, u_rad1, u_shape1);
+    d = first ? d1 : blendSurfaces(d, d1, u_fusionSpan);
+    first = false;
+  }
+  if (u_count > 2.5 && u_fused2 > 0.5) {
+    float d2 = evalElement(p, u_rect2, u_rad2, u_shape2);
+    d = first ? d2 : blendSurfaces(d, d2, u_fusionSpan);
+    first = false;
+  }
+  if (u_count > 3.5 && u_fused3 > 0.5) {
+    float d3 = evalElement(p, u_rect3, u_rad3, u_shape3);
+    d = first ? d3 : blendSurfaces(d, d3, u_fusionSpan);
+    first = false;
+  }
+  if (u_count > 4.5 && u_fused4 > 0.5) {
+    float d4 = evalElement(p, u_rect4, u_rad4, u_shape4);
+    d = first ? d4 : blendSurfaces(d, d4, u_fusionSpan);
+    first = false;
+  }
+  if (u_count > 5.5 && u_fused5 > 0.5) {
+    float d5 = evalElement(p, u_rect5, u_rad5, u_shape5);
+    d = first ? d5 : blendSurfaces(d, d5, u_fusionSpan);
+    first = false;
+  }
+  if (u_count > 6.5 && u_fused6 > 0.5) {
+    float d6 = evalElement(p, u_rect6, u_rad6, u_shape6);
+    d = first ? d6 : blendSurfaces(d, d6, u_fusionSpan);
+    first = false;
+  }
+  if (u_count > 7.5 && u_fused7 > 0.5) {
+    float d7 = evalElement(p, u_rect7, u_rad7, u_shape7);
+    d = first ? d7 : blendSurfaces(d, d7, u_fusionSpan);
+    first = false;
+  }
+  return d;
+}
+
+// Unified drop shadow along the fused perimeter and the liquid bridge
+// Perfectly matches CSS box-shadow: 0 14px 28px rgba(0, 0, 0, 0.16), 0 2px 6px rgba(0, 0, 0, 0.06)
+vec4 calcDropShadow(vec2 p) {
+  vec2 off1 = vec2(0.0, 14.0 * u_dpr);
+  float blur1 = 28.0 * u_dpr;
+  float d1 = mapFusedScene(p - off1);
+  float a1 = smoothstep(0.0, 1.0, 0.5 - 0.5 * (d1 / blur1)) * 0.16;
+
+  vec2 off2 = vec2(0.0, 2.0 * u_dpr);
+  float blur2 = 6.0 * u_dpr;
+  float d2 = mapFusedScene(p - off2);
+  float a2 = smoothstep(0.0, 1.0, 0.5 - 0.5 * (d2 / blur2)) * 0.06;
+
+  float totalA = clamp(a1 + a2, 0.0, 1.0);
+  return vec4(0.0, 0.0, 0.0, totalA);
+}
+
 vec2 calcGradient(vec2 p) {
-  float eps = 1.0;
-  float dx = (mapScene(vec2(p.x + eps, p.y)) - mapScene(vec2(p.x - eps, p.y))) * 0.5;
-  float dy = (mapScene(vec2(p.x, p.y + eps)) - mapScene(vec2(p.x, p.y - eps))) * 0.5;
+  float eps = 1.5;
+  float dx = (mapScene(vec2(p.x + eps, p.y)) - mapScene(vec2(p.x - eps, p.y))) * (0.5 / eps);
+  float dy = (mapScene(vec2(p.x, p.y + eps)) - mapScene(vec2(p.x, p.y - eps))) * (0.5 / eps);
   return vec2(dx, dy);
 }
 
@@ -149,7 +218,14 @@ void main() {
   vec2 p = vec2(gl_FragCoord.x, u_resolution.y - gl_FragCoord.y);
 
   float d = mapScene(p);
-  if (d > 1.0) {
+  if (d > 0.5) {
+    if (u_hasFusedElements > 0.5 && d < 44.0 * u_dpr) {
+      vec4 shadow = calcDropShadow(p);
+      if (shadow.a > 0.001) {
+        gl_FragColor = shadow;
+        return;
+      }
+    }
     gl_FragColor = vec4(0.0);
     return;
   }
@@ -162,11 +238,21 @@ void main() {
   }
 
   vec4 tint = u_tint0;
-  float invTA = 1.0 - tint.a;
+  // Clear optical refraction when frosted = 0 (preserves 100% color fidelity);
+  // smoothly blooms into rich milky frosted glass as frosted increases.
+  float frostedFactor = clamp(u_frosted / 10.0, 0.0, 1.0);
+  float activeTintA = mix(min(tint.a, 0.03), tint.a, frostedFactor);
+  float invTA = 1.0 - activeTintA;
 
   vec2 offset = vec2(0.0);
   float topSheenVal = 0.0;
   float disp = 0.0;
+
+  vec2 grad = vec2(0.0);
+  float gradLen = 0.0;
+  float slopeFactor = 0.0;
+  vec2 norm = vec2(0.0);
+  bool hasGrad = false;
 
   // Refraction physics strictly on the beveled rim, identical to CPU buildElementLUT / renderFusedCluster
   if (d < 0.0 && -d < u_rim) {
@@ -176,10 +262,11 @@ void main() {
     float sheen = lut.b * 32.0;   // Unscale _T2 sheen
     disp = lut.a * 0.025;         // Unscale _T4 chromatic dispersion
 
-    vec2 grad = calcGradient(p);
-    float gradLen = length(grad);
-    float slopeFactor = clamp(gradLen, 0.0, 1.0);
-    vec2 norm = gradLen > 0.0001 ? grad / gradLen : vec2(0.0);
+    grad = calcGradient(p);
+    hasGrad = true;
+    gradLen = length(grad);
+    slopeFactor = clamp(gradLen, 0.0, 1.0);
+    norm = gradLen > 0.0001 ? grad / gradLen : vec2(0.0);
 
     float shift = gain * (u_ior - 1.0) * u_height;
     offset = -norm * slopeFactor * shift;
@@ -195,9 +282,11 @@ void main() {
   if (absD < 3.0) {
     float gPos = absD * 0.33;
     vec4 gLut = texture2D(u_lut, vec2((gPos * 255.0 + 0.5) / 256.0, 0.5));
-    vec2 grad = calcGradient(p);
-    float gradLen = length(grad);
-    float slopeFactor = clamp(gradLen, 0.0, 1.0);
+    if (!hasGrad) {
+      grad = calcGradient(p);
+      gradLen = length(grad);
+      slopeFactor = clamp(gradLen, 0.0, 1.0);
+    }
     glintVal = gLut.g * 255.0 * slopeFactor;
   }
 
@@ -231,10 +320,10 @@ void main() {
   vec3 finalRgb;
   if (tint.a < 0.15) {
     float clearH = topSheenVal * 0.92 + glintVal * 0.88;
-    finalRgb = bgCol * invTA + tint.rgb * tint.a + vec3(clearH / 255.0);
+    finalRgb = bgCol * invTA + tint.rgb * activeTintA + vec3(clearH / 255.0);
   } else {
     float highlight = topSheenVal * 0.78 + glintVal * 0.65;
-    finalRgb = bgCol * invTA + tint.rgb * tint.a + vec3(
+    finalRgb = bgCol * invTA + tint.rgb * activeTintA + vec3(
       highlight * 0.72 / 255.0,
       highlight * 0.88 / 255.0,
       highlight / 255.0
@@ -340,6 +429,8 @@ export class WebGLGlassRenderer {
     this.uHeight = gl.getUniformLocation(this.program, 'u_height');
     this.uFusionSpan = gl.getUniformLocation(this.program, 'u_fusionSpan');
     this.uCount = gl.getUniformLocation(this.program, 'u_count');
+    this.uDpr = gl.getUniformLocation(this.program, 'u_dpr');
+    this.uHasFusedElements = gl.getUniformLocation(this.program, 'u_hasFusedElements');
 
     // Downsample Uniforms
     this.uDownsampleImage = gl.getUniformLocation(this.downsampleProgram, 'u_image');
@@ -356,7 +447,8 @@ export class WebGLGlassRenderer {
         rect: gl.getUniformLocation(this.program, `u_rect${i}`),
         rad: gl.getUniformLocation(this.program, `u_rad${i}`),
         tint: gl.getUniformLocation(this.program, `u_tint${i}`),
-        shape: gl.getUniformLocation(this.program, `u_shape${i}`)
+        shape: gl.getUniformLocation(this.program, `u_shape${i}`),
+        fused: gl.getUniformLocation(this.program, `u_fused${i}`)
       });
     }
 
@@ -662,7 +754,7 @@ export class WebGLGlassRenderer {
     const rimPx = Math.max(1, (options.rim || 16) * dpr);
     const heightPx = (options.height || 18) * dpr;
     const ior = options.ior || 1.46;
-    const fusionDistance = typeof options.fusionDistance === 'number' ? options.fusionDistance : 56;
+    const fusionDistance = typeof options.fusionDistance === 'number' ? options.fusionDistance : DEFAULT_FUSION_DISTANCE;
     const fusionSpan = options.fusion ? fusionDistance * dpr : 0;
 
     gl.uniform2f(this.uResolution, w, h);
@@ -670,9 +762,16 @@ export class WebGLGlassRenderer {
     gl.uniform1f(this.uIor, ior);
     gl.uniform1f(this.uHeight, heightPx);
     gl.uniform1f(this.uFusionSpan, fusionSpan);
+    gl.uniform1f(this.uDpr, dpr);
 
     const count = Math.min(8, elements.length);
-    gl.uniform1i(this.uCount, count);
+    gl.uniform1f(this.uCount, count);
+
+    let hasAnyFused = false;
+    for (let i = 0; i < count; i++) {
+      if (elements[i].fused) hasAnyFused = true;
+    }
+    gl.uniform1f(this.uHasFusedElements, hasAnyFused ? 1.0 : 0.0);
 
     for (let i = 0; i < 8; i++) {
       const slot = this.shapeSlots[i];
@@ -690,6 +789,7 @@ export class WebGLGlassRenderer {
         gl.uniform4f(slot.rect, cx, cy, halfW, halfH);
         gl.uniform1f(slot.rad, r);
         gl.uniform1f(slot.shape, isCircle ? 1.0 : 0.0);
+        gl.uniform1f(slot.fused, el.fused ? 1.0 : 0.0);
 
         const tint = el.tint || [255, 255, 255, 0.05];
         gl.uniform4f(
@@ -703,6 +803,7 @@ export class WebGLGlassRenderer {
         gl.uniform4f(slot.rect, 0, 0, 0, 0);
         gl.uniform1f(slot.rad, 0);
         gl.uniform1f(slot.shape, 0);
+        gl.uniform1f(slot.fused, 0.0);
         gl.uniform4f(slot.tint, 0, 0, 0, 0);
       }
     }

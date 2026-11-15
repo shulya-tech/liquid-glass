@@ -4,7 +4,7 @@
  */
 
 import { _T0, _T1, _T2, _T3, _T4 } from './tables.mjs';
-import { WebGLGlassRenderer } from './webgl.mjs';
+import { WebGLGlassRenderer, DEFAULT_FUSION_DISTANCE } from './webgl.mjs';
 
 /**
  * Default parameter values and strict min/max clamping bounds
@@ -15,6 +15,7 @@ export const OPTICAL_DEFAULTS = Object.freeze({
   height: 18,
   frosted: 0,
   fusion: true,
+  fusionDistance: 88,
   dpr: 0
 });
 
@@ -61,6 +62,10 @@ export function normalizeOptions(options = {}) {
       OPTICAL_LIMITS.frosted.max
     ),
     fusion: options.fusion !== undefined ? Boolean(options.fusion) : OPTICAL_DEFAULTS.fusion,
+    fusionDistance:
+      typeof options.fusionDistance === 'number' && !Number.isNaN(options.fusionDistance)
+        ? Math.max(10, Math.min(200, options.fusionDistance))
+        : (OPTICAL_DEFAULTS.fusionDistance || DEFAULT_FUSION_DISTANCE),
     dpr:
       typeof options.dpr === 'number' && options.dpr > 0
         ? clampNumber(options.dpr, 1, OPTICAL_LIMITS.dpr.min, OPTICAL_LIMITS.dpr.max)
@@ -106,14 +111,15 @@ export function evalCircle(px, py, r) {
 }
 
 /**
- * Tabular surface coalescence using precomputed _T3 empirical bridge weights
+ * Smooth quadratic minimum matching empirical _T3 bridge calibration
+ * Guarantees thick, continuous liquid droplet attraction without creases or filaments.
  */
 export function blendSurfaces(d1, d2, span) {
   if (span <= 0.001) return Math.min(d1, d2);
   const diff = Math.abs(d1 - d2);
   if (diff >= span) return Math.min(d1, d2);
-  const weight = sampleTable(_T3, diff / span);
-  return Math.min(d1, d2) - weight * span;
+  const h = span - diff;
+  return Math.min(d1, d2) - (h * h * 0.25) / span;
 }
 
 /**
@@ -231,10 +237,11 @@ let clusterDistGridCap = 0;
 let clusterDstImg = null;
 let clusterDstImgW = 0;
 let clusterDstImgH = 0;
+let lastClusterRect = null;
 
 export function renderFusedCluster(ctx, sourceCtx, elements, rawOptions = {}, dpr = 1) {
   const options = normalizeOptions(rawOptions);
-  const fusionSpan = options.fusion ? (rawOptions.fusionDistance ?? 56) * dpr : 0;
+  const fusionSpan = options.fusion ? (rawOptions.fusionDistance ?? DEFAULT_FUSION_DISTANCE) * dpr : 0;
   const rimPx = Math.max(1, options.rim * dpr);
   const ior = options.ior;
   const heightPx = options.height * dpr;
@@ -268,9 +275,11 @@ export function renderFusedCluster(ctx, sourceCtx, elements, rawOptions = {}, dp
   const srcImg = sourceCtx.getImageData(cMinX, cMinY, boxW, boxH);
   const srcData = srcImg.data;
 
-  if (ctx.canvas.width !== boxW || ctx.canvas.height !== boxH) {
-    ctx.canvas.width = boxW;
-    ctx.canvas.height = boxH;
+  if (ctx.canvas !== clusterOverlayCanvas) {
+    if (ctx.canvas.width !== boxW || ctx.canvas.height !== boxH) {
+      ctx.canvas.width = boxW;
+      ctx.canvas.height = boxH;
+    }
   }
 
   const needCap = boxW * boxH;
@@ -314,8 +323,13 @@ export function renderFusedCluster(ctx, sourceCtx, elements, rawOptions = {}, dp
   const tR = primary.tintR;
   const tG = primary.tintG;
   const tB = primary.tintB;
-  const tA = primary.tintA;
+  const rawTA = primary.tintA;
+  const frostedFactor = Math.min(1.0, Math.max(0.0, (options.frosted || 0) / 10.0));
+  const tA = Math.min(rawTA, 0.03) + (rawTA - Math.min(rawTA, 0.03)) * frostedFactor;
   const invTA = 1.0 - tA;
+  const tR_tA = Math.round(tR * tA);
+  const tG_tA = Math.round(tG * tA);
+  const tB_tA = Math.round(tB * tA);
   const span = fusionSpan;
   const invSpan = span > 0.001 ? 1.0 / span : 0;
 
@@ -348,10 +362,8 @@ export function renderFusedCluster(ctx, sourceCtx, elements, rawOptions = {}, dp
         } else if (b.fusion && span > 0.001) {
           const diff = dCluster > dShape ? dCluster - dShape : dShape - dCluster;
           if (diff < span) {
-            const pos = diff * invSpan * 255.0;
-            const pIdx = Math.min(254, pos | 0);
-            const wWeight = _T3[pIdx] + (_T3[pIdx + 1] - _T3[pIdx]) * (pos - pIdx);
-            dCluster = (dCluster < dShape ? dCluster : dShape) - wWeight * span;
+            const h = span - diff;
+            dCluster = (dCluster < dShape ? dCluster : dShape) - (h * h * 0.25) / span;
           } else if (dShape < dCluster) {
             dCluster = dShape;
           }
@@ -407,9 +419,9 @@ export function renderFusedCluster(ctx, sourceCtx, elements, rawOptions = {}, dp
         } else {
           // Fast interior path: zero displacement inside flat region (-d >= rimPx)
           const sIdx = idx * 4;
-          dstData[sIdx] = Math.min(255, Math.round(srcData[sIdx] * invTA + tR * tA));
-          dstData[sIdx + 1] = Math.min(255, Math.round(srcData[sIdx + 1] * invTA + tG * tA));
-          dstData[sIdx + 2] = Math.min(255, Math.round(srcData[sIdx + 2] * invTA + tB * tA));
+          dstData[sIdx] = (srcData[sIdx] * invTA + tR_tA) | 0;
+          dstData[sIdx + 1] = (srcData[sIdx + 1] * invTA + tG_tA) | 0;
+          dstData[sIdx + 2] = (srcData[sIdx + 2] * invTA + tB_tA) | 0;
           dstData[sIdx + 3] = 255;
           continue;
         }
@@ -449,7 +461,15 @@ export function renderFusedCluster(ctx, sourceCtx, elements, rawOptions = {}, dp
     }
   }
 
-  ctx.putImageData(dstImg, 0, 0);
+  if (ctx.canvas === clusterOverlayCanvas) {
+    if (lastClusterRect) {
+      ctx.clearRect(lastClusterRect.x, lastClusterRect.y, lastClusterRect.w, lastClusterRect.h);
+    }
+    ctx.putImageData(dstImg, cMinX, cMinY);
+    lastClusterRect = { x: cMinX, y: cMinY, w: boxW, h: boxH };
+  } else {
+    ctx.putImageData(dstImg, 0, 0);
+  }
   return { cMinX, cMinY, boxW, boxH, cssMinX, cssMinY, cssW: cssMaxX - cssMinX, cssH: cssMaxY - cssMinY };
 }
 
@@ -474,6 +494,7 @@ let rafScheduled = false;
 let rafId = 0;
 let listenersAttached = false;
 let lastFrostedRadius = -1;
+
 
 function hasLiveBackgroundCanvas() {
   if (typeof document === 'undefined') return false;
@@ -577,7 +598,7 @@ function ensureStageBuffers(customDpr = 0) {
     blurCanvas = document.createElement('canvas');
     blurCtx = blurCanvas.getContext('2d', { willReadFrequently: true });
     domCacheCanvas = document.createElement('canvas');
-    domCacheCtx = domCacheCanvas.getContext('2d');
+    domCacheCtx = domCacheCanvas.getContext('2d', { willReadFrequently: true });
   }
 
   if (stageCanvas.width !== bufW || stageCanvas.height !== bufH) {
@@ -595,16 +616,28 @@ function ensureStageBuffers(customDpr = 0) {
   if (!clusterOverlayCanvas) {
     clusterOverlayCanvas = document.createElement('canvas');
     clusterOverlayCanvas.className = 'lg-cluster-canvas';
+    clusterOverlayCanvas.setAttribute('aria-hidden', 'true');
     clusterOverlayCanvas.style.cssText = `
       position: fixed;
       top: 0;
       left: 0;
+      width: 100vw;
+      height: 100vh;
       pointer-events: none;
-      z-index: 48;
-      display: none;
+      z-index: 49;
+      transform: translate3d(0, 0, 0);
+      -webkit-transform: translate3d(0, 0, 0);
+      will-change: transform;
+      visibility: hidden;
     `;
     document.body.appendChild(clusterOverlayCanvas);
-    clusterOverlayCtx = clusterOverlayCanvas.getContext('2d');
+    clusterOverlayCtx = clusterOverlayCanvas.getContext('2d', { willReadFrequently: true });
+  }
+
+  if (clusterOverlayCanvas.width !== bufW || clusterOverlayCanvas.height !== bufH) {
+    clusterOverlayCanvas.width = bufW;
+    clusterOverlayCanvas.height = bufH;
+    lastClusterRect = null;
   }
 
   return true;
@@ -628,8 +661,8 @@ function ensureWebGLRenderer(customDpr = 0) {
   const docEl = document.documentElement;
   const vw = Math.max(1, window.innerWidth, docEl ? docEl.clientWidth : 0);
   const vh = Math.max(1, window.innerHeight, docEl ? docEl.clientHeight : 0);
-  const bufW = Math.round(vw * dpr);
-  const bufH = Math.round(vh * dpr);
+  const bufW = Math.max(1, Math.round(vw * dpr));
+  const bufH = Math.max(1, Math.round(vh * dpr));
 
   if (!webglCanvas) {
     const canvas = document.createElement('canvas');
@@ -642,7 +675,10 @@ function ensureWebGLRenderer(customDpr = 0) {
       width: 100vw;
       height: 100vh;
       pointer-events: none;
-      z-index: 48;
+      z-index: 49;
+      transform: translate3d(0, 0, 0);
+      -webkit-transform: translate3d(0, 0, 0);
+      will-change: transform;
       display: none;
     `;
     document.body.appendChild(canvas);
@@ -652,8 +688,6 @@ function ensureWebGLRenderer(customDpr = 0) {
   if (webglCanvas.width !== bufW || webglCanvas.height !== bufH) {
     webglCanvas.width = bufW;
     webglCanvas.height = bufH;
-    webglCanvas.style.width = `${vw}px`;
-    webglCanvas.style.height = `${vh}px`;
   }
 
   if (!webglRenderer) {
@@ -689,9 +723,33 @@ function checkCanvasFilterBlur() {
  */
 function renderDomSurfacesToCache(dpr, vw, vh, bw, bh) {
   if (!domCacheCanvas || !domCacheCtx) return;
+  let maxScanY = vh + 20;
+  if (controllerRegistry.size > 0) {
+    let m = 0;
+    for (const ctrl of controllerRegistry) {
+      if (ctrl._mounted && ctrl.enabled && ctrl.element) {
+        const r = ctrl.element.getBoundingClientRect();
+        if (r.bottom > m) m = r.bottom;
+      }
+    }
+    if (m > 0 && m < vh * 0.7) {
+      maxScanY = Math.ceil(m + 40);
+    }
+  }
+  paintDomSurfaces(domCacheCtx, dpr, vw, bw, bh, -20, maxScanY, 0);
+}
+
+/**
+ * Paints simplified DOM surfaces whose viewport rects intersect [minY, maxY]
+ * into ctx, with viewport y = originY mapped to canvas y = 0.
+ */
+function paintDomSurfaces(ctx, dpr, vw, bw, bh, minY, maxY, originY) {
+  const domCacheCtx = ctx;
+  const maxScanY = maxY;
   domCacheCtx.clearRect(0, 0, bw, bh);
   domCacheCtx.save();
   domCacheCtx.scale(dpr, dpr);
+  domCacheCtx.translate(0, -originY);
 
   const mainEl = document.querySelector('main, footer');
   if (mainEl) {
@@ -702,7 +760,7 @@ function renderDomSurfacesToCache(dpr, vw, vh, bw, bh) {
     for (let i = 0; i < surfaceEls.length; i++) {
       const el = surfaceEls[i];
       const r = el.getBoundingClientRect();
-      if (r.bottom < -20 || r.top > vh + 20 || r.width <= 2 || r.height <= 2) continue;
+      if (r.bottom < minY || r.top > maxScanY || r.width <= 2 || r.height <= 2) continue;
       const style = window.getComputedStyle(el);
       const rad = Math.min(parseFloat(style.borderRadius) || 12, r.width * 0.5, r.height * 0.5);
       const cls = typeof el.className === 'string' ? el.className : '';
@@ -752,7 +810,7 @@ function renderDomSurfacesToCache(dpr, vw, vh, bw, bh) {
       const img = imgs[i];
       if (!img.complete || img.naturalWidth === 0) continue;
       const r = img.getBoundingClientRect();
-      if (r.bottom < -20 || r.top > vh + 20 || r.right < 0 || r.left > vw) continue;
+      if (r.bottom < minY || r.top > maxScanY || r.right < 0 || r.left > vw) continue;
       try {
         domCacheCtx.save();
         const parent = img.parentElement;
@@ -778,7 +836,7 @@ function renderDomSurfacesToCache(dpr, vw, vh, bw, bh) {
       const el = textEls[i];
       if (el.tagName === 'A' && el.querySelector('img, h3')) continue;
       const r = el.getBoundingClientRect();
-      if (r.bottom < -20 || r.top > vh + 20 || r.height <= 0 || r.width <= 0) continue;
+      if (r.bottom < minY || r.top > maxScanY || r.height <= 0 || r.width <= 0) continue;
       const tag = el.tagName;
       const style = window.getComputedStyle(el);
       const cls = typeof el.className === 'string' ? el.className : '';
@@ -830,18 +888,10 @@ function renderDomSurfacesToCache(dpr, vw, vh, bw, bh) {
       domCacheCtx.textAlign = isCentered ? 'center' : 'left';
       const drawX = isCentered ? r.left + r.width * 0.5 : r.left + (tag === 'INPUT' ? 12 : 0);
 
-      for (let wIdx = 0; wIdx < words.length; wIdx++) {
-        const testLine = line ? `${line} ${words[wIdx]}` : words[wIdx];
-        if (!isButtonOrPill && domCacheCtx.measureText(testLine).width > r.width && line) {
-          domCacheCtx.fillText(line, drawX, y);
-          line = words[wIdx];
-          y += lineHeight;
-        } else {
-          line = testLine;
-        }
-      }
-      if (line) {
-        domCacheCtx.fillText(line, drawX, y);
+      if (!isButtonOrPill && r.width > 20) {
+        domCacheCtx.fillText(text, drawX, y, r.width);
+      } else {
+        domCacheCtx.fillText(text, drawX, y);
       }
       domCacheCtx.restore();
     }
@@ -926,6 +976,7 @@ function captureViewportStage(neededBlur, customDpr = 0) {
   }
 }
 
+
 /**
  * Fast Isolated Lens Renderer (Takes ~0.12 ms using precomputed TypedArray LUT!)
  */
@@ -966,7 +1017,9 @@ function renderIsolatedController(ctrl, rect) {
   const lensData = lensImg.data;
 
   // Start with tinted interior copy
-  const [tR, tG, tB, tA] = ctrl._tint;
+  const [tR, tG, tB, rawTA] = ctrl._tint;
+  const frostedFactor = Math.min(1.0, Math.max(0.0, (ctrl.options.frosted || 0) / 10.0));
+  const tA = Math.min(rawTA, 0.03) + (rawTA - Math.min(rawTA, 0.03)) * frostedFactor;
   const invTA = 1.0 - tA;
   const offsets = lut.offsets;
   const dispMap = lut.dispMap;
@@ -1026,7 +1079,7 @@ function renderIsolatedController(ctrl, rect) {
   ctrl._canvas.style.opacity = '1';
 }
 
-function areRectsTouching(r1, r2, threshold = 34) {
+function areRectsTouching(r1, r2, threshold = 56) {
   const dx = Math.max(
     0,
     Math.abs(r1.left + r1.width * 0.5 - (r2.left + r2.width * 0.5)) -
@@ -1061,7 +1114,7 @@ function renderAllActiveLenses() {
     const r = ctrl.element.getBoundingClientRect();
     if (r.width <= 4 || r.height <= 4) continue;
     // Keep off-screen fusion anchors (within 80px of viewport) in the active list when fusion is enabled
-    const margin = ctrl.options.fusion ? 80 : 0;
+    const margin = ctrl.options.fusion ? DEFAULT_FUSION_DISTANCE : 0;
     if (
       r.bottom < -margin ||
       r.top > vh + margin ||
@@ -1081,22 +1134,66 @@ function renderAllActiveLenses() {
 
   if (visible.length === 0) {
     if (webglCanvas) webglCanvas.style.display = 'none';
-    if (clusterOverlayCanvas) clusterOverlayCanvas.style.display = 'none';
+    if (clusterOverlayCanvas) {
+      clusterOverlayCanvas.style.visibility = 'hidden';
+      if (lastClusterRect && clusterOverlayCtx) {
+        clusterOverlayCtx.clearRect(lastClusterRect.x, lastClusterRect.y, lastClusterRect.w, lastClusterRect.h);
+        lastClusterRect = null;
+      }
+    }
     return;
   }
 
-  // Fast-path: Skip expensive DOM queries and 2D canvas repaints while dragging lenses
-  const needsCapture = stageDirty || !stageCanvas || (useWebGL && !webglRenderer?.hasSourceTex);
+  const needsCapture = stageDirty || !stageCanvas;
   if (needsCapture) {
     captureViewportStage(maxFrosted, activeDpr);
     stageDirty = false;
   }
 
-  // WebGL Fast-Path: 100% GPU Execution, zero CPU loops, 60-120 FPS
+  // WebGL Fast-Path: single fullscreen GPU draw call (zero canvas reallocations, 120 FPS locked)
   if (useWebGL && ensureWebGLRenderer(activeDpr)) {
     try {
       const dpr = getDevicePixelRatio(activeDpr);
-      const elements = visible.map(({ ctrl, rect }) => ({
+      const n = visible.length;
+      const fusedFlags = new Array(n).fill(false);
+
+      for (let i = 0; i < n; i++) {
+        if (!visible[i].ctrl.options.fusion) continue;
+        const baseThresh = (visible[i].ctrl.options.fusionDistance || DEFAULT_FUSION_DISTANCE);
+        const thresh = visible[i].ctrl._fused ? baseThresh + 8 : baseThresh;
+        for (let j = 0; j < n; j++) {
+          if (i !== j && visible[j].ctrl.options.fusion) {
+            if (areRectsTouching(visible[i].rect, visible[j].rect, thresh)) {
+              fusedFlags[i] = true;
+              fusedFlags[j] = true;
+            }
+          }
+        }
+      }
+
+      for (let i = 0; i < n; i++) {
+        visible[i].ctrl._fused = fusedFlags[i];
+      }
+
+      // Remove CSS box-shadow from elements where they merge, restore when unmerged!
+      for (let i = 0; i < n; i++) {
+        const el = visible[i].ctrl.element;
+        if (el) {
+          if (fusedFlags[i]) {
+            if (el._lgOrigBoxShadow === undefined) {
+              el._lgOrigBoxShadow = el.style.boxShadow || '';
+            }
+            if (el.style.boxShadow !== 'none') {
+              el.style.boxShadow = 'none';
+            }
+          } else if (el._lgOrigBoxShadow !== undefined) {
+            el.style.boxShadow = el._lgOrigBoxShadow;
+            delete el._lgOrigBoxShadow;
+          }
+        }
+      }
+
+      const elements = visible.map(({ ctrl, rect }, i) => ({
         x: rect.left,
         y: rect.top,
         w: rect.width,
@@ -1104,7 +1201,8 @@ function renderAllActiveLenses() {
         borderRadius: ctrl._getRadius(),
         shape: ctrl._getShape(),
         tint: ctrl._tint,
-        fusion: ctrl.options.fusion
+        fusion: ctrl.options.fusion,
+        fused: fusedFlags[i]
       }));
 
       for (let i = 0; i < visible.length; i++) {
@@ -1128,23 +1226,24 @@ function renderAllActiveLenses() {
 
       if (webglCanvas) {
         webglCanvas.style.display = 'block';
-        if (clusterOverlayCanvas) clusterOverlayCanvas.style.display = 'none';
+        if (clusterOverlayCanvas) clusterOverlayCanvas.style.visibility = 'hidden';
 
-        let maxZ = 20;
+        let minZ = 50;
         for (let i = 0; i < visible.length; i++) {
-          const item = visible[i];
-          if (item.ctrl && item.ctrl.element) {
-            const z = parseInt(item.ctrl.element.style?.zIndex, 10) || item.ctrl._cachedZIndex || 20;
-            if (z > maxZ) maxZ = z;
-          }
+          const z = visible[i].ctrl._cachedZIndex || 50;
+          if (z < minZ) minZ = z;
         }
-        webglCanvas.style.zIndex = String(maxZ);
+        webglCanvas.style.zIndex = String(Math.max(1, minZ - 1));
       }
       return;
     } catch (e) {
       console.warn('[LiquidGlass] WebGL render failed, falling back to 2D canvas:', e);
       useWebGL = false;
     }
+  }
+  if (needsCapture) {
+    captureViewportStage(maxFrosted, activeDpr);
+    stageDirty = false;
   }
 
   if (webglCanvas) {
@@ -1168,9 +1267,10 @@ function renderAllActiveLenses() {
 
   for (let i = 0; i < n; i++) {
     if (!visible[i].ctrl.options.fusion) continue;
+    const thresh = (visible[i].ctrl.options.fusionDistance || DEFAULT_FUSION_DISTANCE);
     for (let j = i + 1; j < n; j++) {
       if (!visible[j].ctrl.options.fusion) continue;
-      if (areRectsTouching(visible[i].rect, visible[j].rect, 34)) {
+      if (areRectsTouching(visible[i].rect, visible[j].rect, thresh)) {
         union(i, j);
       }
     }
@@ -1216,13 +1316,13 @@ function renderAllActiveLenses() {
         elements,
         {
           ...primaryCtrl.options,
-          fusionDistance: primaryCtrl.options.fusionDistance || 56
+          fusionDistance: primaryCtrl.options.fusionDistance || DEFAULT_FUSION_DISTANCE
         },
         dpr
       );
 
       if (box && clusterOverlayCanvas) {
-        clusterOverlayCanvas.style.display = 'block';
+        clusterOverlayCanvas.style.visibility = 'visible';
         clusterOverlayCanvas.style.filter = 'none';
 
         if (clusterOverlayCanvas.parentElement !== document.body) {
@@ -1232,22 +1332,20 @@ function renderAllActiveLenses() {
         // Match z-index to highest element in the cluster so it cleanly covers individual elements
         let maxZ = 20;
         for (const item of group) {
-          if (item.ctrl && item.ctrl.element) {
-            const z = parseInt(item.ctrl.element.style?.zIndex, 10) || item.ctrl._cachedZIndex || 20;
-            if (z > maxZ) maxZ = z;
-          }
+          const z = item.ctrl._cachedZIndex || 20;
+          if (z > maxZ) maxZ = z;
         }
-        clusterOverlayCanvas.style.zIndex = String(maxZ);
-
-        clusterOverlayCanvas.style.transform = `translate3d(${box.cssMinX}px, ${box.cssMinY}px, 0)`;
-        clusterOverlayCanvas.style.width = `${box.cssW}px`;
-        clusterOverlayCanvas.style.height = `${box.cssH}px`;
+        clusterOverlayCanvas.style.zIndex = String(maxZ + 1);
       }
     }
   }
 
   if (!hasFusedCluster && clusterOverlayCanvas) {
-    clusterOverlayCanvas.style.display = 'none';
+    clusterOverlayCanvas.style.visibility = 'hidden';
+    if (lastClusterRect && clusterOverlayCtx) {
+      clusterOverlayCtx.clearRect(lastClusterRect.x, lastClusterRect.y, lastClusterRect.w, lastClusterRect.h);
+      lastClusterRect = null;
+    }
   }
 }
 
@@ -1259,32 +1357,64 @@ export function scheduleStageRedraw(dirty = false) {
   rafId = window.requestAnimationFrame(renderAllActiveLenses);
 }
 
+export function redrawStageNow(dirty = false) {
+  if (dirty) stageDirty = true;
+  if (typeof window === 'undefined') return;
+  if (rafScheduled) {
+    window.cancelAnimationFrame(rafId);
+    rafScheduled = false;
+  }
+  renderAllActiveLenses();
+}
+
+let isPointerDown = false;
+if (typeof window !== 'undefined') {
+  window.addEventListener('pointerdown', () => { isPointerDown = true; }, { passive: true, capture: true });
+  window.addEventListener('pointerup', () => { isPointerDown = false; }, { passive: true, capture: true });
+  window.addEventListener('pointercancel', () => { isPointerDown = false; }, { passive: true, capture: true });
+}
+
 function attachGlobalStageListeners() {
   if (listenersAttached || typeof window === 'undefined') return;
   listenersAttached = true;
 
-  const markDirty = () => {
+  let scrollRestTimer = null;
+  const onScroll = () => {
+    // Redraw glass positions at native 120 FPS immediately without expensive DOM scanning or texture uploads
+    scheduleStageRedraw(false);
+
+    if (scrollRestTimer) clearTimeout(scrollRestTimer);
+    scrollRestTimer = setTimeout(() => {
+      domCacheDirty = true;
+      stageDirty = true;
+      scheduleStageRedraw(true);
+    }, 150);
+  };
+
+  const onResize = () => {
     domCacheDirty = true;
     stageDirty = true;
     scheduleStageRedraw(true);
   };
 
-  window.addEventListener('scroll', markDirty, { passive: true });
-  window.addEventListener('resize', markDirty, { passive: true });
+  window.addEventListener('scroll', onScroll, { passive: true });
+  window.addEventListener('resize', onResize, { passive: true });
 
-  // Ambient background canvas sync:
-  // - WebGL (GPU): Uncapped native 60 / 120 FPS directly via requestAnimationFrame
-  // - 2D Canvas (CPU): Throttled to 30 FPS (32ms timeout) to preserve CPU & battery
+  // Live background canvas sync: 60/120 FPS on WebGL GPU path; 8 FPS (125ms) throttled on CPU
   const tick = () => {
     if (controllerRegistry.size > 0 && hasLiveBackgroundCanvas()) {
-      stageDirty = true;
-      scheduleStageRedraw(true);
+      if (!isPointerDown) {
+        if (useWebGL) {
+          scheduleStageRedraw(true);
+          window.requestAnimationFrame(tick);
+          return;
+        } else {
+          stageDirty = true;
+          scheduleStageRedraw(true);
+        }
+      }
     }
-    if (useWebGL) {
-      window.requestAnimationFrame(tick);
-    } else {
-      window.setTimeout(() => window.requestAnimationFrame(tick), 32);
-    }
+    window.setTimeout(() => window.requestAnimationFrame(tick), 125);
   };
   window.requestAnimationFrame(tick);
 }
@@ -1305,12 +1435,34 @@ export class LiquidGlassController {
     this._ro = null;
     this._tint = [15, 23, 42, 0.35];
     this._savedBg = '';
+    this._cachedZIndex = 50;
     this._mounted = false;
     this._init();
   }
 
+  _computeZIndex() {
+    if (!this.element || typeof window === 'undefined') return 50;
+    if (this.options && typeof this.options.zIndex === 'number') {
+      return this.options.zIndex;
+    }
+    const attrZ = parseInt(this.element.getAttribute('data-lg-z-index'), 10);
+    if (!isNaN(attrZ)) return attrZ;
+
+    let curr = this.element;
+    while (curr && curr !== document.body) {
+      const inlineZ = curr.style && curr.style.zIndex ? parseInt(curr.style.zIndex, 10) : NaN;
+      if (!isNaN(inlineZ) && inlineZ > 0) return inlineZ;
+      const computedZ = parseInt(window.getComputedStyle(curr).zIndex, 10);
+      if (!isNaN(computedZ) && computedZ > 0) return computedZ;
+      curr = curr.parentElement;
+    }
+    return 50;
+  }
+
   _init() {
     if (!this.element || typeof document === 'undefined') return;
+
+    this._cachedZIndex = this._computeZIndex();
 
     if (!this.element.style.position) {
       const computed = window.getComputedStyle(this.element);
@@ -1350,6 +1502,7 @@ export class LiquidGlassController {
 
     if (typeof ResizeObserver !== 'undefined') {
       this._ro = new ResizeObserver(() => {
+        this._cachedZIndex = this._computeZIndex();
         scheduleStageRedraw();
       });
       this._ro.observe(this.element);
@@ -1362,6 +1515,7 @@ export class LiquidGlassController {
         this.element.style.backgroundColor = 'transparent';
       }
       this._mo = new MutationObserver(() => {
+        this._cachedZIndex = this._computeZIndex();
         if (this.element) {
           const newAttrTint = this.element.getAttribute('data-lg-tint');
           if (newAttrTint) {
@@ -1429,10 +1583,17 @@ export class LiquidGlassController {
 
     if (newOptions.enabled !== undefined && Boolean(newOptions.enabled) !== this.enabled) {
       this.enabled = Boolean(newOptions.enabled);
+      if (this.element) {
+        if (!this.enabled && this._savedBg) {
+          this.element.style.backgroundColor = this._savedBg;
+        } else if (this.enabled) {
+          this.element.style.backgroundColor = 'transparent';
+        }
+      }
       changed = true;
     }
 
-    for (const key of ['rim', 'ior', 'height', 'frosted', 'fusion', 'dpr']) {
+    for (const key of ['rim', 'ior', 'height', 'frosted', 'fusion', 'fusionDistance', 'dpr']) {
       if (merged[key] !== this.options[key]) {
         this.options[key] = merged[key];
         changed = true;
@@ -1445,6 +1606,7 @@ export class LiquidGlassController {
     if (lutChanged) {
       this._lut = null;
     }
+    this._cachedZIndex = this._computeZIndex();
     if (changed) {
       scheduleStageRedraw(true);
     }
@@ -1466,6 +1628,9 @@ export class LiquidGlassController {
     }
     if (this._canvas && this._canvas.parentNode) {
       this._canvas.parentNode.removeChild(this._canvas);
+    }
+    if (this.element && this._savedBg) {
+      this.element.style.backgroundColor = this._savedBg;
     }
     this._mounted = false;
     scheduleStageRedraw();

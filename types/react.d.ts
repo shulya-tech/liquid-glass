@@ -4,7 +4,8 @@ import {
   LiquidGlassController,
   OPTICAL_DEFAULTS,
   OPTICAL_LIMITS,
-  scheduleStageRedraw
+  scheduleStageRedraw,
+  redrawStageNow
 } from './index';
 
 export interface LiquidGlassProps
@@ -30,6 +31,7 @@ export {
   OPTICAL_DEFAULTS,
   OPTICAL_LIMITS,
   scheduleStageRedraw,
+  redrawStageNow,
   setUseWebGL,
   isWebGLActive
 };

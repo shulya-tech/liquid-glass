@@ -1,6 +1,7 @@
 exports.LiquidGlassController = require('./core.cjs').LiquidGlassController;
 exports.createLiquidGlass = require('./core.cjs').createLiquidGlass;
 exports.scheduleStageRedraw = require('./core.cjs').scheduleStageRedraw;
+exports.redrawStageNow = require('./core.cjs').redrawStageNow;
 exports.OPTICAL_DEFAULTS = require('./core.cjs').OPTICAL_DEFAULTS;
 exports.OPTICAL_LIMITS = require('./core.cjs').OPTICAL_LIMITS;
 exports.normalizeOptions = require('./core.cjs').normalizeOptions;

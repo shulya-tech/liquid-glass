@@ -31,6 +31,7 @@ exports.useLiquidGlass = function useLiquidGlass(options = {}) {
         height: options.height,
         frosted: options.frosted,
         fusion: options.fusion,
+        fusionDistance: options.fusionDistance,
         enabled: options.enabled,
         dpr: options.dpr
       });
@@ -41,6 +42,7 @@ exports.useLiquidGlass = function useLiquidGlass(options = {}) {
     options.height,
     options.frosted,
     options.fusion,
+    options.fusionDistance,
     options.enabled,
     options.dpr
   ]);
@@ -58,6 +60,7 @@ const LiquidGlass = exports.LiquidGlass = forwardRef(function LiquidGlass(
     height = OPTICAL_DEFAULTS.height,
     frosted = OPTICAL_DEFAULTS.frosted,
     fusion = OPTICAL_DEFAULTS.fusion,
+    fusionDistance,
     enabled = true,
     dpr = OPTICAL_DEFAULTS.dpr,
     as: Component = 'div',
@@ -74,6 +77,7 @@ const LiquidGlass = exports.LiquidGlass = forwardRef(function LiquidGlass(
     height,
     frosted,
     fusion,
+    fusionDistance,
     enabled,
     dpr
   });
@@ -106,6 +110,7 @@ exports.LiquidGlassController = require('./core.cjs').LiquidGlassController;
 exports.OPTICAL_DEFAULTS = require('./core.cjs').OPTICAL_DEFAULTS;
 exports.OPTICAL_LIMITS = require('./core.cjs').OPTICAL_LIMITS;
 exports.scheduleStageRedraw = require('./core.cjs').scheduleStageRedraw;
+exports.redrawStageNow = require('./core.cjs').redrawStageNow;
 exports.setUseWebGL = require('./core.cjs').setUseWebGL;
 exports.isWebGLActive = require('./core.cjs').isWebGLActive;
 exports.default = LiquidGlass;
