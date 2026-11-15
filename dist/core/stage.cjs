@@ -310,9 +310,13 @@ function renderAllActiveLenses() {
       const idB = visible[j].ctrl._id || (j + 1);
       const pairKey = idA < idB ? `${idA}:${idB}` : `${idB}:${idA}`;
 
+      const wasFused = activeFusedPairs.has(pairKey);
+      // Hysteresis corridor (+16px): prevents rapid flipping/flickering at the threshold boundary
+      const exitThresh = baseThresh + 16;
+      const currentThresh = wasFused ? exitThresh : baseThresh;
+
       const dist = getRectDistance(visible[i].rect, visible[j].rect);
-      // Elements only fuse when they make physical contact (dist <= 0)
-      if (dist <= 0) {
+      if (dist < currentThresh) {
         nextFusedPairs.add(pairKey);
         union(i, j);
       }
@@ -426,9 +430,8 @@ function renderAllActiveLenses() {
       if (item.ctrl._ctx && item.ctrl._canvas) {
         item.ctrl._ctx.clearRect(0, 0, item.ctrl._canvas.width, item.ctrl._canvas.height);
       }
-      const targetShadow = item.ctrl._savedShadow || DEFAULT_SHADOW;
-      if (item.ctrl.element && item.ctrl.element.style.boxShadow !== targetShadow) {
-        item.ctrl.element.style.boxShadow = targetShadow;
+      if (item.ctrl.element && item.ctrl.element.style.boxShadow !== 'none') {
+        item.ctrl.element.style.boxShadow = 'none';
       }
     }
 

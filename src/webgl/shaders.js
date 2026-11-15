@@ -216,6 +216,13 @@ void main() {
 
   float d = mapScene(p);
   if (d > 0.5) {
+    if (d < 44.0 * u_dpr) {
+      vec4 shadow = calcDropShadow(p);
+      if (shadow.a > 0.001) {
+        gl_FragColor = shadow;
+        return;
+      }
+    }
     gl_FragColor = vec4(0.0);
     return;
   }
