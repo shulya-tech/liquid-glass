@@ -125,13 +125,12 @@ exports.checkCanvasFilterBlur = function checkCanvasFilterBlur() {
 }
 
 /**
- * Tests whether two DOM element bounding rects are touching / proximity-fused
+ * Returns surface-to-surface distance between two DOM bounding rects
  * @param {DOMRect} r1 - First rect
  * @param {DOMRect} r2 - Second rect
- * @param {number} threshold - Distance threshold in pixels
- * @returns {boolean}
+ * @returns {number} Distance in pixels (0 if touching/overlapping)
  */
-exports.areRectsTouching = function areRectsTouching(r1, r2, threshold = 56) {
+exports.getRectDistance = function getRectDistance(r1, r2) {
   const dx = Math.max(
     0,
     Math.abs(r1.left + r1.width * 0.5 - (r2.left + r2.width * 0.5)) -
@@ -142,5 +141,16 @@ exports.areRectsTouching = function areRectsTouching(r1, r2, threshold = 56) {
     Math.abs(r1.top + r1.height * 0.5 - (r2.top + r2.height * 0.5)) -
       (r1.height + r2.height) * 0.5
   );
-  return Math.hypot(dx, dy) < threshold;
+  return Math.hypot(dx, dy);
+}
+
+/**
+ * Tests whether two DOM element bounding rects are touching / proximity-fused
+ * @param {DOMRect} r1 - First rect
+ * @param {DOMRect} r2 - Second rect
+ * @param {number} threshold - Distance threshold in pixels
+ * @returns {boolean}
+ */
+exports.areRectsTouching = function areRectsTouching(r1, r2, threshold = 56) {
+  return getRectDistance(r1, r2) < threshold;
 }

@@ -37,16 +37,22 @@ export function renderIsolatedController(ctrl, rect, { stageCtx, blurCtx }) {
     ctrl._canvas.height = h;
   }
 
-  // Use exact un-clamped element position in physical canvas pixels
+  // Use exact un-clamped element position in physical canvas pixels with rim padding
   const dx = Math.round(rect.left * dpr);
   const dy = Math.round(rect.top * dpr);
+  const rimPx = Math.max(1, (ctrl.options.rim || 16) * dpr);
+  const pad = Math.ceil(rimPx * 0.5) + 4;
+  const sx0 = dx - pad;
+  const sy0 = dy - pad;
+  const sw = w + pad * 2;
+  const sh = h + pad * 2;
 
   const sourceCtx = ctrl.options.frosted > 0 ? (blurCtx || stageCtx) : stageCtx;
   if (!sourceCtx || !sourceCtx.canvas || sourceCtx.canvas.width === 0 || sourceCtx.canvas.height === 0) return;
 
   let srcImg;
   try {
-    srcImg = sourceCtx.getImageData(dx, dy, w, h);
+    srcImg = sourceCtx.getImageData(sx0, sy0, sw, sh);
   } catch {
     return;
   }
@@ -83,20 +89,20 @@ export function renderIsolatedController(ctrl, rect, { stageCtx, blurCtx }) {
 
     let rBg, gBg, bBg;
     if (disp > 0 && (offX !== 0 || offY !== 0)) {
-      const sxG = Math.max(0, Math.min(w - 1, x + offX));
-      const syG = Math.max(0, Math.min(h - 1, y + offY));
-      const sxR = Math.max(0, Math.min(w - 1, x + Math.round(offX * (1.0 + disp))));
-      const syR = Math.max(0, Math.min(h - 1, y + Math.round(offY * (1.0 + disp))));
-      const sxB = Math.max(0, Math.min(w - 1, x + Math.round(offX * (1.0 - disp))));
-      const syB = Math.max(0, Math.min(h - 1, y + Math.round(offY * (1.0 - disp))));
+      const sxG = Math.max(0, Math.min(sw - 1, x + pad + offX));
+      const syG = Math.max(0, Math.min(sh - 1, y + pad + offY));
+      const sxR = Math.max(0, Math.min(sw - 1, x + pad + Math.round(offX * (1.0 + disp))));
+      const syR = Math.max(0, Math.min(sh - 1, y + pad + Math.round(offY * (1.0 + disp))));
+      const sxB = Math.max(0, Math.min(sw - 1, x + pad + Math.round(offX * (1.0 - disp))));
+      const syB = Math.max(0, Math.min(sh - 1, y + pad + Math.round(offY * (1.0 - disp))));
 
-      rBg = srcData[(syR * w + sxR) * 4];
-      gBg = srcData[(syG * w + sxG) * 4 + 1];
-      bBg = srcData[(syB * w + sxB) * 4 + 2];
+      rBg = srcData[(syR * sw + sxR) * 4];
+      gBg = srcData[(syG * sw + sxG) * 4 + 1];
+      bBg = srcData[(syB * sw + sxB) * 4 + 2];
     } else {
-      const sx = Math.max(0, Math.min(w - 1, x + offX));
-      const sy = Math.max(0, Math.min(h - 1, y + offY));
-      const sIdx = (sy * w + sx) * 4;
+      const sx = Math.max(0, Math.min(sw - 1, x + pad + offX));
+      const sy = Math.max(0, Math.min(sh - 1, y + pad + offY));
+      const sIdx = (sy * sw + sx) * 4;
       rBg = srcData[sIdx];
       gBg = srcData[sIdx + 1];
       bBg = srcData[sIdx + 2];
@@ -118,5 +124,7 @@ export function renderIsolatedController(ctrl, rect, { stageCtx, blurCtx }) {
   }
 
   ctrl._ctx.putImageData(lensImg, 0, 0);
-  ctrl._canvas.style.opacity = '1';
+  if (ctrl._canvas.style.display !== 'block') {
+    ctrl._canvas.style.display = 'block';
+  }
 }

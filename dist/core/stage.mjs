@@ -8,11 +8,13 @@ import { DEFAULT_FUSION_DISTANCE } from './options.mjs';
 import {
   getDevicePixelRatio,
   hasLiveBackgroundCanvas,
-  areRectsTouching
+  areRectsTouching,
+  getRectDistance
 } from './dom.mjs';
 import { renderDomSurfacesToCache } from './dom-cache.mjs';
 import { renderIsolatedController } from '../canvas2d/isolated.mjs';
 import { WebGLGlassRenderer } from '../webgl/renderer.mjs';
+import { DEFAULT_SHADOW } from './controller.mjs';
 
 export const controllerRegistry = new Set();
 
@@ -27,6 +29,7 @@ let domCacheDirty = true;
 let webglCanvas = null;
 let webglRenderer = null;
 let activeClusterTier = 0;
+let activeFusedPairs = new Set();
 let rafScheduled = false;
 let rafId = 0;
 let listenersAttached = false;
@@ -270,6 +273,7 @@ function renderAllActiveLenses() {
 
   // Disjoint-set clustering of visible elements:
   // Elements that are touching/fusing are united into a single cluster ONLY if they share the exact same z-index!
+  const nextFusedPairs = new Set();
   const n = visible.length;
   const parent = new Int32Array(n);
   for (let i = 0; i < n; i++) parent[i] = i;
@@ -294,12 +298,25 @@ function renderAllActiveLenses() {
       // STRICT: only elements with the exact same z-index can coalesce/fuse!
       if (zI !== zJ) continue;
 
-      const thresh = Math.max(threshI, visible[j].ctrl.options.fusionDistance || DEFAULT_FUSION_DISTANCE);
-      if (areRectsTouching(visible[i].rect, visible[j].rect, thresh)) {
+      const baseThresh = Math.max(threshI, visible[j].ctrl.options.fusionDistance || DEFAULT_FUSION_DISTANCE);
+      const idA = visible[i].ctrl._id || (i + 1);
+      const idB = visible[j].ctrl._id || (j + 1);
+      const pairKey = idA < idB ? `${idA}:${idB}` : `${idB}:${idA}`;
+
+      const wasFused = activeFusedPairs.has(pairKey);
+      // Hysteresis corridor (+16px): prevents rapid flipping/flickering at the threshold boundary
+      const exitThresh = baseThresh + 16;
+      const currentThresh = wasFused ? exitThresh : baseThresh;
+
+      const dist = getRectDistance(visible[i].rect, visible[j].rect);
+      if (dist < currentThresh) {
+        nextFusedPairs.add(pairKey);
         union(i, j);
       }
     }
   }
+
+  activeFusedPairs = nextFusedPairs;
 
   const clusterGroups = new Map();
   for (let i = 0; i < n; i++) {
@@ -375,8 +392,12 @@ function renderAllActiveLenses() {
   for (let i = 0; i < isolated.length; i++) {
     const { ctrl, rect } = isolated[i];
     ctrl._fused = false;
-    if (ctrl._canvas && ctrl._canvas.style.opacity !== '1') {
-      ctrl._canvas.style.opacity = '1';
+    if (ctrl._canvas && ctrl._canvas.style.display !== 'block') {
+      ctrl._canvas.style.display = 'block';
+    }
+    const targetShadow = ctrl._savedShadow || DEFAULT_SHADOW;
+    if (ctrl.element && ctrl.element.style.boxShadow !== targetShadow) {
+      ctrl.element.style.boxShadow = targetShadow;
     }
     renderIsolatedController(ctrl, rect, {
       stageCtx,
@@ -396,8 +417,11 @@ function renderAllActiveLenses() {
     for (let i = 0; i < group.length; i++) {
       const item = group[i];
       item.ctrl._fused = true;
-      if (item.ctrl._canvas && item.ctrl._canvas.style.opacity !== '0') {
-        item.ctrl._canvas.style.opacity = '0';
+      if (item.ctrl._canvas && item.ctrl._canvas.style.display !== 'none') {
+        item.ctrl._canvas.style.display = 'none';
+      }
+      if (item.ctrl.element && item.ctrl.element.style.boxShadow !== 'none') {
+        item.ctrl.element.style.boxShadow = 'none';
       }
     }
 
@@ -417,6 +441,29 @@ function renderAllActiveLenses() {
       const rimVal = item.ctrl.options.rim;
       if (typeof rimVal === 'number' && rimVal > maxRim) maxRim = rimVal;
     }
+
+    // Measure group inter-element distance for smooth continuous bridge ramp
+    let groupMinDist = Infinity;
+    let groupThresh = DEFAULT_FUSION_DISTANCE;
+    for (let gi = 0; gi < group.length; gi++) {
+      const tI = group[gi].ctrl.options.fusionDistance || DEFAULT_FUSION_DISTANCE;
+      for (let gj = gi + 1; gj < group.length; gj++) {
+        const d = getRectDistance(group[gi].rect, group[gj].rect);
+        if (d < groupMinDist) {
+          groupMinDist = d;
+          groupThresh = Math.max(tI, group[gj].ctrl.options.fusionDistance || DEFAULT_FUSION_DISTANCE);
+        }
+      }
+    }
+
+    // Continuous dynamic bridge ramp:
+    // When distance is near threshold, bridge starts smoothly and widens as distance closes.
+    // Completely eliminates visual jumping / popping at the contact boundary!
+    const effectiveThresh = groupThresh + 16;
+    const clampedDist = Math.max(0, Math.min(groupMinDist, effectiveThresh));
+    const tRamp = 1.0 - clampedDist / effectiveThresh;
+    const bridgeRamp = tRamp * tRamp * (3.0 - 2.0 * tRamp);
+    const easedFusionSpan = Math.max(16, Math.round(groupThresh * bridgeRamp));
 
     const cssPad = Math.max(maxRim + 16, 44);
     const boxCssLeft = Math.max(0, Math.floor(minCssX - cssPad));
@@ -473,7 +520,10 @@ function renderAllActiveLenses() {
           {
             elements,
             hasFused: true,
-            options: primaryCtrl.options,
+            options: {
+              ...primaryCtrl.options,
+              fusionDistance: easedFusionSpan
+            },
             areaOriginX: Math.round(boxCssLeft * dpr),
             areaOriginY: Math.round(boxCssTop * dpr),
             scissorX,

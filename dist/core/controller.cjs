@@ -9,8 +9,14 @@ const { controllerRegistry,
   scheduleStageRedraw,
   attachGlobalStageListeners } = require('./stage.cjs');
 
+let ctrlCounter = 0;
+
+const DEFAULT_SHADOW = exports.DEFAULT_SHADOW =
+  '0 14px 28px rgba(0, 0, 0, 0.16), 0 2px 6px rgba(0, 0, 0, 0.06)';
+
 const LiquidGlassController = exports.LiquidGlassController = class LiquidGlassController {
   constructor(element, options = {}) {
+    this._id = ++ctrlCounter;
     this.element = element;
     this.options = normalizeOptions(options);
     this.enabled = options.enabled !== undefined ? Boolean(options.enabled) : true;
@@ -22,6 +28,7 @@ const LiquidGlassController = exports.LiquidGlassController = class LiquidGlassC
     this._mo = null;
     this._tint = [15, 23, 42, 0.35];
     this._savedBg = '';
+    this._savedShadow = '';
     this._cachedZIndex = 50;
     this._mounted = false;
     this._fused = false;
@@ -75,6 +82,14 @@ const LiquidGlassController = exports.LiquidGlassController = class LiquidGlassC
     this._savedBg = attrTint || this.element.style.backgroundColor || computed.backgroundColor;
     this._tint = parseCssRgba(this._savedBg);
     this.element.style.backgroundColor = 'transparent';
+
+    const existingShadow = this.element.style.boxShadow || computed.boxShadow;
+    if (!existingShadow || existingShadow === 'none') {
+      this._savedShadow = DEFAULT_SHADOW;
+      this.element.style.boxShadow = DEFAULT_SHADOW;
+    } else {
+      this._savedShadow = existingShadow;
+    }
 
     const canvas = document.createElement('canvas');
     canvas.className = 'lg-lens-canvas';
@@ -291,6 +306,10 @@ const LiquidGlassController = exports.LiquidGlassController = class LiquidGlassC
     }
     if (this.element && this._savedBg) {
       this.element.style.backgroundColor = this._savedBg;
+    }
+    if (this.element && this._savedShadow !== undefined) {
+      this.element.style.boxShadow =
+        this._savedShadow === DEFAULT_SHADOW ? '' : this._savedShadow;
     }
     if (this.element && this.element._lgController === this) {
       delete this.element._lgController;
