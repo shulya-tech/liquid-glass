@@ -125,6 +125,7 @@ float blendSurfaces(float d1, float d2, float span) {
 float mapScene(vec2 p) {
   if (u_count <= 0.5) return 9999.0;
   float d = evalElement(p, u_rect0, u_rad0, u_shape0);
+  if (u_hasFusedElements < 0.5) return d;
   if (u_count > 1.5) d = blendSurfaces(d, evalElement(p, u_rect1, u_rad1, u_shape1), u_fusionSpan);
   if (u_count > 2.5) d = blendSurfaces(d, evalElement(p, u_rect2, u_rad2, u_shape2), u_fusionSpan);
   if (u_count > 3.5) d = blendSurfaces(d, evalElement(p, u_rect3, u_rad3, u_shape3), u_fusionSpan);
@@ -181,17 +182,17 @@ float mapFusedScene(vec2 p) {
   return d;
 }
 
-// Unified drop shadow along the fused perimeter and the liquid bridge
+// Unified GPU drop shadow for all elements and liquid bridges
 // Perfectly matches CSS box-shadow: 0 14px 28px rgba(0, 0, 0, 0.16), 0 2px 6px rgba(0, 0, 0, 0.06)
 vec4 calcDropShadow(vec2 p) {
   vec2 off1 = vec2(0.0, 14.0 * u_dpr);
   float blur1 = 28.0 * u_dpr;
-  float d1 = mapFusedScene(p - off1);
+  float d1 = mapScene(p - off1);
   float a1 = smoothstep(0.0, 1.0, 0.5 - 0.5 * (d1 / blur1)) * 0.16;
 
   vec2 off2 = vec2(0.0, 2.0 * u_dpr);
   float blur2 = 6.0 * u_dpr;
-  float d2 = mapFusedScene(p - off2);
+  float d2 = mapScene(p - off2);
   float a2 = smoothstep(0.0, 1.0, 0.5 - 0.5 * (d2 / blur2)) * 0.06;
 
   float totalA = clamp(a1 + a2, 0.0, 1.0);
@@ -211,7 +212,7 @@ void main() {
 
   float d = mapScene(p);
   if (d > 0.5) {
-    if (u_hasFusedElements > 0.5 && d < 44.0 * u_dpr) {
+    if (d < 44.0 * u_dpr) {
       vec4 shadow = calcDropShadow(p);
       if (shadow.a > 0.001) {
         gl_FragColor = shadow;
@@ -282,27 +283,37 @@ void main() {
     glintVal = gLut.g * 255.0 * slopeFactor;
   }
 
-  // Chromatic dispersion: separate Red, Green and Blue ray paths
+  // Chromatic dispersion: separate Red, Green and Blue ray paths (hardware direct UV)
   vec2 baseP = p + offset;
-  vec2 uvG = vec2(baseP.x / u_resolution.x, 1.0 - baseP.y / u_resolution.y);
+  vec2 uvG = vec2(baseP.x / u_resolution.x, baseP.y / u_resolution.y);
   vec2 pR = p + offset * (1.0 + disp);
-  vec2 uvR = vec2(pR.x / u_resolution.x, 1.0 - pR.y / u_resolution.y);
+  vec2 uvR = vec2(pR.x / u_resolution.x, pR.y / u_resolution.y);
   vec2 pB = p + offset * (1.0 - disp);
-  vec2 uvB = vec2(pB.x / u_resolution.x, 1.0 - pB.y / u_resolution.y);
+  vec2 uvB = vec2(pB.x / u_resolution.x, pB.y / u_resolution.y);
 
-  vec3 sharpCol = vec3(
-    texture2D(u_source, clamp(uvR, 0.0, 1.0)).r,
-    texture2D(u_source, clamp(uvG, 0.0, 1.0)).g,
-    texture2D(u_source, clamp(uvB, 0.0, 1.0)).b
-  );
+  vec3 sharpCol;
+  if (disp > 0.0001) {
+    sharpCol = vec3(
+      texture2D(u_source, clamp(uvR, 0.0, 1.0)).r,
+      texture2D(u_source, clamp(uvG, 0.0, 1.0)).g,
+      texture2D(u_source, clamp(uvB, 0.0, 1.0)).b
+    );
+  } else {
+    sharpCol = texture2D(u_source, clamp(uvG, 0.0, 1.0)).rgb;
+  }
 
   vec3 bgCol;
   if (u_frosted > 0.001) {
-    vec3 blurCol = vec3(
-      texture2D(u_blur, clamp(uvR, 0.0, 1.0)).r,
-      texture2D(u_blur, clamp(uvG, 0.0, 1.0)).g,
-      texture2D(u_blur, clamp(uvB, 0.0, 1.0)).b
-    );
+    vec3 blurCol;
+    if (disp > 0.0001) {
+      blurCol = vec3(
+        texture2D(u_blur, clamp(uvR, 0.0, 1.0)).r,
+        texture2D(u_blur, clamp(uvG, 0.0, 1.0)).g,
+        texture2D(u_blur, clamp(uvB, 0.0, 1.0)).b
+      );
+    } else {
+      blurCol = texture2D(u_blur, clamp(uvG, 0.0, 1.0)).rgb;
+    }
     float frostedMix = clamp(u_frosted, 0.0, 1.0);
     bgCol = mix(sharpCol, blurCol, frostedMix);
   } else {

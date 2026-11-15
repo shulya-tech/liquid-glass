@@ -1,12 +1,12 @@
 /**
  * DOM Surface Cache Painter
  * Renders simplified DOM cards, typography, and images onto an offscreen canvas
- * so viewport refraction has live page context with zero animation frame lag.
+ * restricted strictly to active glass element regions with zero animation frame lag.
  */
 
 /**
  * Paints simplified DOM surfaces whose viewport rects intersect [minY, maxY]
- * into ctx, with viewport y = originY mapped to canvas y = 0.
+ * and any of the active cluster regions into ctx.
  *
  * @param {CanvasRenderingContext2D} ctx
  * @param {number} dpr
@@ -16,8 +16,9 @@
  * @param {number} minY
  * @param {number} maxY
  * @param {number} originY
+ * @param {Array<{left: number, top: number, right: number, bottom: number}>|null} clusterBoxes
  */
-export function paintDomSurfaces(ctx, dpr, vw, bw, bh, minY, maxY, originY) {
+export function paintDomSurfaces(ctx, dpr, vw, bw, bh, minY, maxY, originY, clusterBoxes = null) {
   if (typeof document === 'undefined') return;
 
   const domCacheCtx = ctx;
@@ -26,6 +27,32 @@ export function paintDomSurfaces(ctx, dpr, vw, bw, bh, minY, maxY, originY) {
   domCacheCtx.save();
   domCacheCtx.scale(dpr, dpr);
   domCacheCtx.translate(0, -originY);
+
+  // When cluster regions are provided, clip canvas strictly to those regions
+  if (clusterBoxes && clusterBoxes.length > 0) {
+    domCacheCtx.beginPath();
+    for (let b = 0; b < clusterBoxes.length; b++) {
+      const box = clusterBoxes[b];
+      domCacheCtx.rect(
+        box.left,
+        box.top - originY,
+        box.right - box.left,
+        box.bottom - box.top
+      );
+    }
+    domCacheCtx.clip();
+  }
+
+  const intersectsAnyCluster = (r) => {
+    if (!clusterBoxes || clusterBoxes.length === 0) return true;
+    for (let i = 0; i < clusterBoxes.length; i++) {
+      const b = clusterBoxes[i];
+      if (!(r.left > b.right || r.right < b.left || r.top > b.bottom || r.bottom < b.top)) {
+        return true;
+      }
+    }
+    return false;
+  };
 
   const mainEl = document.querySelector('main, footer');
   if (mainEl) {
@@ -37,6 +64,8 @@ export function paintDomSurfaces(ctx, dpr, vw, bw, bh, minY, maxY, originY) {
       const el = surfaceEls[i];
       const r = el.getBoundingClientRect();
       if (r.bottom < minY || r.top > maxScanY || r.width <= 2 || r.height <= 2) continue;
+      if (!intersectsAnyCluster(r)) continue;
+
       const style = window.getComputedStyle(el);
       const rad = Math.min(parseFloat(style.borderRadius) || 12, r.width * 0.5, r.height * 0.5);
       const cls = typeof el.className === 'string' ? el.className : '';
@@ -87,6 +116,8 @@ export function paintDomSurfaces(ctx, dpr, vw, bw, bh, minY, maxY, originY) {
       if (!img.complete || img.naturalWidth === 0) continue;
       const r = img.getBoundingClientRect();
       if (r.bottom < minY || r.top > maxScanY || r.right < 0 || r.left > vw) continue;
+      if (!intersectsAnyCluster(r)) continue;
+
       try {
         domCacheCtx.save();
         const parent = img.parentElement;
@@ -113,6 +144,8 @@ export function paintDomSurfaces(ctx, dpr, vw, bw, bh, minY, maxY, originY) {
       if (el.tagName === 'A' && el.querySelector('img, h3')) continue;
       const r = el.getBoundingClientRect();
       if (r.bottom < minY || r.top > maxScanY || r.height <= 0 || r.width <= 0) continue;
+      if (!intersectsAnyCluster(r)) continue;
+
       const tag = el.tagName;
       const style = window.getComputedStyle(el);
       const cls = typeof el.className === 'string' ? el.className : '';
@@ -184,8 +217,19 @@ export function paintDomSurfaces(ctx, dpr, vw, bw, bh, minY, maxY, originY) {
  * @param {number} vh
  * @param {number} bw
  * @param {number} bh
+ * @param {Array<{left: number, top: number, right: number, bottom: number}>|null} clusterBoxes
  */
-export function renderDomSurfacesToCache(domCacheCanvas, domCacheCtx, controllerRegistry, dpr, vw, vh, bw, bh) {
+export function renderDomSurfacesToCache(
+  domCacheCanvas,
+  domCacheCtx,
+  controllerRegistry,
+  dpr,
+  vw,
+  vh,
+  bw,
+  bh,
+  clusterBoxes = null
+) {
   if (!domCacheCanvas || !domCacheCtx) return;
   let maxScanY = vh + 20;
   if (controllerRegistry && controllerRegistry.size > 0) {
@@ -200,5 +244,5 @@ export function renderDomSurfacesToCache(domCacheCanvas, domCacheCtx, controller
       maxScanY = Math.ceil(m + 40);
     }
   }
-  paintDomSurfaces(domCacheCtx, dpr, vw, bw, bh, -20, maxScanY, 0);
+  paintDomSurfaces(domCacheCtx, dpr, vw, bw, bh, -20, maxScanY, 0, clusterBoxes);
 }

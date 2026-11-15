@@ -44,8 +44,7 @@ body {
   z-index: 20;
   cursor: grab;
   touch-action: none;
-  will-change: left, top;
-  box-shadow: 0 14px 28px rgba(0, 0, 0, 0.16), 0 2px 6px rgba(0, 0, 0, 0.06);
+  will-change: transform;
 }
 
 .glass-body:active {
@@ -64,10 +63,12 @@ body {
   gap: 18px;
   padding: 10px 20px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.8);
-  backdrop-filter: blur(20px) saturate(180%);
-  -webkit-backdrop-filter: blur(20px) saturate(180%);
-  border: 1px solid rgba(255, 255, 255, 0.9);
+  background: rgba(255, 255, 255, 0.78);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  isolation: isolate;
+  contain: layout style;
+  border: 1px solid rgba(255, 255, 255, 0.85);
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.07), 0 2px 6px rgba(0, 0, 0, 0.03);
   color: #1c1c1e;
   flex-wrap: wrap;

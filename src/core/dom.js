@@ -97,12 +97,6 @@ export function isMobileDevice() {
  * @returns {number} Effective device pixel ratio
  */
 export function getDevicePixelRatio(customDpr = 0) {
-  if (isMobileDevice()) {
-    if (typeof customDpr === 'number' && customDpr > 0) {
-      return Math.min(customDpr, 1.5);
-    }
-    return 1.0;
-  }
   if (typeof customDpr === 'number' && customDpr > 0) {
     return Math.max(0.5, Math.min(3.0, customDpr));
   }
