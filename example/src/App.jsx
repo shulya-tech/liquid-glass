@@ -9,9 +9,7 @@ import {
   LiquidGlass,
   OPTICAL_DEFAULTS,
   scheduleStageRedraw,
-  redrawStageNow,
-  setUseWebGL,
-  isWebGLActive
+  redrawStageNow
 } from '@shulya/liquid-glass/react';
 
 /**
@@ -76,17 +74,40 @@ export function computeOptimalDpr() {
  * - High-contrast black/white stripes (240x48, r: 24, 24px grating)
  * - Bold center typography "Shulya" (800 weight with subtle drop shadow)
  */
-function drawStageBackground(canvas, dpr = computeOptimalDpr()) {
-  if (!canvas) return;
-  const rect = canvas.getBoundingClientRect();
-  const w = Math.max(1, Math.round(rect.width || window.innerWidth));
-  const h = Math.max(1, Math.round(rect.height || window.innerHeight));
+let staticCanvas = null;
+let staticBufW = 0;
+let staticBufH = 0;
+let staticDpr = 0;
 
-  canvas.width = Math.floor(w * dpr);
-  canvas.height = Math.floor(h * dpr);
+/**
+ * Pre-renders heavy static backdrop (grid, pill track, ribbon, spheres, text, shadows)
+ * into an offscreen canvas once. Avoids recomputing 5 expensive Gaussian shadow blurs
+ * at high DPI on every frame, which severely lags Safari's Canvas 2D engine.
+ */
+function getStaticBackground(w, h, dpr) {
+  const bufW = Math.max(1, Math.floor(w * dpr));
+  const bufH = Math.max(1, Math.floor(h * dpr));
 
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return;
+  if (
+    staticCanvas &&
+    staticBufW === bufW &&
+    staticBufH === bufH &&
+    staticDpr === dpr
+  ) {
+    return staticCanvas;
+  }
+
+  if (!staticCanvas) {
+    staticCanvas = document.createElement('canvas');
+  }
+  staticCanvas.width = bufW;
+  staticCanvas.height = bufH;
+  staticBufW = bufW;
+  staticBufH = bufH;
+  staticDpr = dpr;
+
+  const ctx = staticCanvas.getContext('2d');
+  if (!ctx) return staticCanvas;
 
   ctx.save();
   ctx.scale(dpr, dpr);
@@ -220,6 +241,82 @@ function drawStageBackground(canvas, dpr = computeOptimalDpr()) {
   ctx.restore();
 
   ctx.restore();
+  return staticCanvas;
+}
+
+function drawStageBackground(canvas, dpr = computeOptimalDpr(), time = 0) {
+  if (!canvas) return;
+  const w = Math.max(1, window.innerWidth);
+  const h = Math.max(1, window.innerHeight);
+  const bufW = Math.max(1, Math.round(w * dpr));
+  const bufH = Math.max(1, Math.round(h * dpr));
+
+  if (canvas.width !== bufW || canvas.height !== bufH) {
+    canvas.width = bufW;
+    canvas.height = bufH;
+  }
+
+  const cssW = `${w}px`;
+  const cssH = `${h}px`;
+  if (canvas.style.width !== cssW) canvas.style.width = cssW;
+  if (canvas.style.height !== cssH) canvas.style.height = cssH;
+
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+
+  // 1. Single instant GPU blit of cached static backdrop (0.05ms)
+  const staticBackdrop = getStaticBackground(w, h, dpr);
+  ctx.drawImage(staticBackdrop, 0, 0);
+
+  // 2. Smooth floating ambient glowing orbs for real-time optical refraction testing
+  ctx.save();
+  ctx.scale(dpr, dpr);
+
+  const orbs = [
+    {
+      x: w * 0.32 + Math.sin(time * 0.0008) * 85,
+      y: h * 0.42 + Math.cos(time * 0.0006) * 60,
+      r: 95,
+      c1: 'rgba(99, 102, 241, 0.42)',
+      c2: 'rgba(99, 102, 241, 0.0)'
+    },
+    {
+      x: w * 0.72 + Math.cos(time * 0.0007) * 100,
+      y: h * 0.48 + Math.sin(time * 0.0009) * 70,
+      r: 120,
+      c1: 'rgba(236, 72, 153, 0.38)',
+      c2: 'rgba(236, 72, 153, 0.0)'
+    },
+    {
+      x: w * 0.50 + Math.sin(time * 0.0006 + 2.0) * 80,
+      y: h * 0.30 + Math.cos(time * 0.0008 + 1.0) * 50,
+      r: 80,
+      c1: 'rgba(14, 165, 233, 0.40)',
+      c2: 'rgba(14, 165, 233, 0.0)'
+    },
+    {
+      x: w * 0.22 + Math.cos(time * 0.0009 + 3.0) * 70,
+      y: h * 0.75 + Math.sin(time * 0.0007 + 2.5) * 60,
+      r: 105,
+      c1: 'rgba(245, 158, 11, 0.35)',
+      c2: 'rgba(245, 158, 11, 0.0)'
+    }
+  ];
+
+  for (let i = 0; i < orbs.length; i++) {
+    const orb = orbs[i];
+    ctx.save();
+    const radGrad = ctx.createRadialGradient(orb.x, orb.y, 0, orb.x, orb.y, orb.r);
+    radGrad.addColorStop(0, orb.c1);
+    radGrad.addColorStop(1, orb.c2);
+    ctx.fillStyle = radGrad;
+    ctx.beginPath();
+    ctx.arc(orb.x, orb.y, orb.r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  ctx.restore();
 }
 
 function createInitialShapes(w, h) {
@@ -282,15 +379,12 @@ function createInitialShapes(w, h) {
 
 export default function App() {
   const stageRef = useRef(null);
-  const fpsRef = useRef(null);
 
   // Optical parameters
   const [rim, setRim] = useState(OPTICAL_DEFAULTS.rim);
   const [ior, setIor] = useState(OPTICAL_DEFAULTS.ior);
   const [height, setHeight] = useState(OPTICAL_DEFAULTS.height);
   const [frosted, setFrosted] = useState(0);
-  const [fusion, setFusion] = useState(OPTICAL_DEFAULTS.fusion);
-  const [useGpu, setUseGpu] = useState(true);
 
   // 1. «Золотое сечение» на старте (computeOptimalDpr)
   const initialDpr = computeOptimalDpr();
@@ -305,14 +399,19 @@ export default function App() {
     return createInitialShapes(w, h);
   });
 
+  const shapesRef = useRef(shapes);
+  shapesRef.current = shapes;
+  const shapeDomRefs = useRef({});
   const dragState = useRef(null);
+  const topZRef = useRef(20);
 
   useLayoutEffect(() => {
     const canvas = stageRef.current;
     if (!canvas) return;
 
-    const syncStage = () => {
-      drawStageBackground(canvas, dprRef.current);
+    let animId = 0;
+    const syncStage = (time = performance.now()) => {
+      drawStageBackground(canvas, dprRef.current, time);
       redrawStageNow(true);
     };
 
@@ -320,14 +419,29 @@ export default function App() {
 
     let ro = null;
     if (typeof ResizeObserver !== 'undefined') {
-      ro = new ResizeObserver(syncStage);
+      ro = new ResizeObserver(() => syncStage());
       ro.observe(canvas);
     }
-    window.addEventListener('resize', syncStage);
+    const handleResize = () => syncStage();
+    window.addEventListener('resize', handleResize);
+
+    let lastBgTime = 0;
+    // Ambient background loop: continuous smooth updates without freezing on drag
+    const loop = (timestamp) => {
+      const bgInterval = 1000 / 30;
+      if (timestamp - lastBgTime >= bgInterval) {
+        lastBgTime = timestamp;
+        drawStageBackground(canvas, dprRef.current, timestamp);
+        redrawStageNow(true);
+      }
+      animId = requestAnimationFrame(loop);
+    };
+    animId = requestAnimationFrame(loop);
 
     return () => {
+      if (animId) cancelAnimationFrame(animId);
       if (ro) ro.disconnect();
-      window.removeEventListener('resize', syncStage);
+      window.removeEventListener('resize', handleResize);
     };
   }, []);
 
@@ -337,128 +451,86 @@ export default function App() {
     }
   }, [dpr]);
 
-  // Synchronous zero-latency redraw when shapes, optical params or fusion change
+  // Synchronous redraw when optical params change
   useLayoutEffect(() => {
     redrawStageNow();
-  }, [shapes, rim, ior, height, frosted, fusion]);
+  }, [rim, ior, height, frosted]);
 
-  // 2. Высокоточный FPS монитор через прямой DOM-текст (0 лишних ререндеров React!)
-  useEffect(() => {
-    let lastFrameTime = performance.now();
-    let consecutiveSlowFrames = 0;
-    let lastDprDropTime = 0;
-    let framesCount = 0;
-    let lastFpsUpdate = performance.now();
-    let accumulatedDelta = 0;
-    let rafId;
-
-    const stepAnimation = (timestamp) => {
-      const frameDelta = timestamp - lastFrameTime;
-      lastFrameTime = timestamp;
-
-      const isVisible = typeof document === 'undefined' || !document.hidden;
-      if (isVisible && frameDelta > 0 && frameDelta <= 2000) {
-        framesCount++;
-        accumulatedDelta += frameDelta;
-
-        if (timestamp - lastFpsUpdate >= 350) {
-          const currentFps = Math.round((framesCount * 1000) / (timestamp - lastFpsUpdate));
-          const avgMs = accumulatedDelta / framesCount;
-          if (fpsRef.current) {
-            const gpu = isWebGLActive();
-            fpsRef.current.textContent = `${Math.min(120, currentFps)} FPS (${avgMs.toFixed(1)} ms) — ${gpu ? 'GPU' : 'CPU'}`;
-            fpsRef.current.style.background = gpu ? 'rgba(48, 209, 88, 0.15)' : 'rgba(255, 149, 0, 0.15)';
-            fpsRef.current.style.color = gpu ? '#248a3d' : '#e05300';
-          }
-          framesCount = 0;
-          accumulatedDelta = 0;
-          lastFpsUpdate = timestamp;
-        }
-
-        // Авто-адаптация для слабого CPU fallback
-        if (!useGpu && frameDelta > 22) {
-          consecutiveSlowFrames++;
-          if (consecutiveSlowFrames >= 3 && timestamp - lastDprDropTime >= 100) {
-            const current = dprRef.current;
-            const nextDpr = Math.max(1.35, +(current * 0.85).toFixed(2));
-            if (nextDpr < current) {
-              setDpr(nextDpr);
-              lastDprDropTime = timestamp;
-            }
-            consecutiveSlowFrames = 0;
-          }
-        } else {
-          consecutiveSlowFrames = 0;
-        }
-      } else {
-        consecutiveSlowFrames = 0;
-      }
-
-      rafId = requestAnimationFrame(stepAnimation);
-    };
-
-    rafId = requestAnimationFrame(stepAnimation);
-    return () => cancelAnimationFrame(rafId);
-  }, [useGpu]);
-
-  // Top-left dragging
+  // Top-left dragging: direct zero-overhead DOM tracking without React re-render hitch
   const handlePointerDown = useCallback((id, e) => {
-    e.currentTarget.setPointerCapture(e.pointerId);
-    setShapes((prev) => {
-      const idx = prev.findIndex((s) => s.id === id);
-      if (idx === -1) return prev;
-      const target = prev[idx];
-      dragState.current = {
-        id,
-        offX: e.clientX - target.x,
-        offY: e.clientY - target.y
-      };
-      const next = [...prev];
-      const [picked] = next.splice(idx, 1);
-      next.push(picked);
-      return next;
-    });
+    const target = shapesRef.current.find((s) => s.id === id);
+    if (!target) return;
+
+    if (e.target && e.target.setPointerCapture && e.pointerId !== undefined) {
+      try {
+        e.target.setPointerCapture(e.pointerId);
+      } catch {}
+    }
+
+    dragState.current = {
+      id,
+      pointerId: e.pointerId,
+      targetEl: e.target,
+      offX: e.clientX - target.x,
+      offY: e.clientY - target.y,
+      currentX: target.x,
+      currentY: target.y
+    };
   }, []);
 
-  // Safari & Chrome 120 FPS Coalesced Dragging (нулевая задержка, устраняет 1000Hz stutter в Safari)
+  // Pointer move & up: zero-overhead DOM tracking without React re-render lag
   useEffect(() => {
-    let rafMoveId = 0;
-    let targetX = 0;
-    let targetY = 0;
-    let targetId = null;
-
     const handlePointerMove = (e) => {
       if (!dragState.current) return;
-      const { id, offX, offY } = dragState.current;
-      targetId = id;
-      targetX = e.clientX - offX;
-      targetY = e.clientY - offY;
+      const d = dragState.current;
+      const evt =
+        e.getCoalescedEvents && e.getCoalescedEvents().length > 0
+          ? e.getCoalescedEvents()[e.getCoalescedEvents().length - 1]
+          : e;
 
-      if (!rafMoveId) {
-        rafMoveId = requestAnimationFrame(() => {
-          rafMoveId = 0;
-          if (dragState.current && targetId) {
-            setShapes((prev) =>
-              prev.map((s) => (s.id === targetId ? { ...s, x: targetX, y: targetY } : s))
-            );
-          }
-        });
+      const newX = evt.clientX - d.offX;
+      const newY = evt.clientY - d.offY;
+      d.currentX = newX;
+      d.currentY = newY;
+
+      // 1. Instantly move DOM element with subpixel hardware precision (0ms latency)
+      const el = shapeDomRefs.current[d.id];
+      if (el) {
+        el.style.transform = `translate3d(${newX}px, ${newY}px, 0)`;
+        if (el._lgController) {
+          el._lgController.setRectPosition(newX, newY);
+        }
       }
+      // 2. Instantly update WebGL scissor region: 0.05ms GPU pass
+      redrawStageNow(false);
     };
 
     const handlePointerUp = () => {
-      if (rafMoveId) {
-        cancelAnimationFrame(rafMoveId);
-        rafMoveId = 0;
+      if (!dragState.current) return;
+      const { id, currentX, currentY, pointerId, targetEl } = dragState.current;
+      if (targetEl && targetEl.releasePointerCapture && pointerId !== undefined) {
+        try {
+          if (targetEl.hasPointerCapture && targetEl.hasPointerCapture(pointerId)) {
+            targetEl.releasePointerCapture(pointerId);
+          }
+        } catch {}
       }
       dragState.current = null;
+      const target = shapesRef.current.find((s) => s.id === id);
+      if (target) {
+        target.x = currentX;
+        target.y = currentY;
+      }
+      const el = shapeDomRefs.current[id];
+      if (el && el._lgController && typeof el._lgController.clearManualPosition === 'function') {
+        el._lgController.clearManualPosition();
+      }
     };
 
     window.addEventListener('pointermove', handlePointerMove, { passive: true });
     window.addEventListener('pointerup', handlePointerUp, { passive: true });
     window.addEventListener('pointercancel', handlePointerUp, { passive: true });
     return () => {
-      if (rafMoveId) cancelAnimationFrame(rafMoveId);
       window.removeEventListener('pointermove', handlePointerMove);
       window.removeEventListener('pointerup', handlePointerUp);
       window.removeEventListener('pointercancel', handlePointerUp);
@@ -474,22 +546,24 @@ export default function App() {
       {shapes.map((s, index) => (
         <LiquidGlass
           key={s.id}
+          ref={(el) => {
+            shapeDomRefs.current[s.id] = el;
+          }}
           rim={rim}
           ior={ior}
           height={height}
           frosted={frosted}
-          fusion={fusion}
           dpr={dpr}
           className="glass-body"
           data-lg-tint="rgba(255, 255, 255, 0.18)"
+          data-lg-z-index={20}
           onPointerDown={(e) => handlePointerDown(s.id, e)}
           style={{
             width: `${s.w}px`,
             height: `${s.h}px`,
             borderRadius: `${s.r}px`,
-            left: `${Math.round(s.x)}px`,
-            top: `${Math.round(s.y)}px`,
-            zIndex: 20 + index
+            transform: `translate3d(${s.x}px, ${s.y}px, 0)`,
+            zIndex: 20
           }}
         />
       ))}
@@ -554,48 +628,6 @@ export default function App() {
             value={frosted}
             onChange={(e) => setFrosted(Number(e.target.value))}
           />
-        </div>
-
-        <label className="ctrl-toggle">
-          <input
-            type="checkbox"
-            checked={fusion}
-            onChange={(e) => setFusion(e.target.checked)}
-          />
-          <span>Liquid Fusion</span>
-        </label>
-
-        <label
-          className="ctrl-toggle"
-          style={{
-            cursor: 'pointer',
-            background: useGpu ? 'rgba(0, 122, 255, 0.12)' : 'rgba(255, 149, 0, 0.15)'
-          }}
-        >
-          <input
-            type="checkbox"
-            checked={useGpu}
-            onChange={(e) => {
-              const val = e.target.checked;
-              setUseGpu(val);
-              setUseWebGL(val);
-              scheduleStageRedraw();
-            }}
-          />
-          <span style={{ fontWeight: 700, color: useGpu ? '#007aff' : '#d70015' }}>
-            {useGpu ? '⚡ WebGL (GPU)' : '🐢 Canvas (CPU)'}
-          </span>
-        </label>
-
-        <div
-          ref={fpsRef}
-          className="fps-tag"
-          style={{
-            background: useGpu ? 'rgba(48, 209, 88, 0.15)' : 'rgba(255, 149, 0, 0.15)',
-            color: useGpu ? '#248a3d' : '#e05300'
-          }}
-        >
-          120 FPS (0.2 ms) — ⚡ GPU
         </div>
       </div>
     </>

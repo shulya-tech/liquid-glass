@@ -1,6 +1,6 @@
 {
   "name": "@shulya/liquid-glass",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "description": "High-performance, hardware-accelerated Liquid Glass optical UI engine with Screen-Space WebGL and empirical LUT 2D canvas fallback for React, Vue, Svelte, Angular, SolidJS, and Vanilla JS.",
   "author": "Shulya (https://shulya.tech)",
   "homepage": "https://liquid.shulya.tech",
@@ -32,32 +32,38 @@
     ".": {
       "types": "./types/index.d.ts",
       "import": "./dist/index.mjs",
-      "require": "./dist/index.cjs"
+      "require": "./dist/index.cjs",
+      "default": "./dist/index.mjs"
     },
     "./react": {
       "types": "./types/react.d.ts",
       "import": "./dist/react.mjs",
-      "require": "./dist/react.cjs"
+      "require": "./dist/react.cjs",
+      "default": "./dist/react.mjs"
     },
     "./vue": {
       "types": "./types/vue.d.ts",
       "import": "./dist/vue.mjs",
-      "require": "./dist/vue.cjs"
+      "require": "./dist/vue.cjs",
+      "default": "./dist/vue.mjs"
     },
     "./svelte": {
       "types": "./types/svelte.d.ts",
       "import": "./dist/svelte.mjs",
-      "require": "./dist/svelte.cjs"
+      "require": "./dist/svelte.cjs",
+      "default": "./dist/svelte.mjs"
     },
     "./angular": {
       "types": "./types/angular.d.ts",
       "import": "./dist/angular.mjs",
-      "require": "./dist/angular.cjs"
+      "require": "./dist/angular.cjs",
+      "default": "./dist/angular.mjs"
     },
     "./solid": {
       "types": "./types/solid.d.ts",
       "import": "./dist/solid.mjs",
-      "require": "./dist/solid.cjs"
+      "require": "./dist/solid.cjs",
+      "default": "./dist/solid.mjs"
     },
     "./tables": {
       "import": "./dist/tables.mjs",

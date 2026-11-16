@@ -19,13 +19,12 @@ This directory contains a complete **React + Vite** application demonstrating th
   - **Rounded Rectangle (`196 × 116 px`, radius `22 px`)** positioned over an electric blue gradient card.
   - **Circular Lens (`112 × 112 px`, radius `56 px`)** positioned over a warm sunset sphere.
 - **High-Contrast Optical Stage:** Features a fine `56 px` architectural hairline grid, a thin diagonal rainbow ribbon, high-contrast black/white stripes, and centered `"Shulya"` typography to inspect edge refraction, chromatic dispersion, and specular bevel highlights.
-- **Liquid Surface Coalescence (`fusion`):** Drag any two or all three `<LiquidGlass>` elements close together to observe real-time liquid bridge coalescence powered by the precomputed empirical lookup tables (`_T0`–`_T4`), or toggle **Liquid Fusion** off in the bottom control shelf to inspect isolated lenses.
+- **Liquid Surface Coalescence:** Drag any two or all three `<LiquidGlass>` elements close together to observe real-time liquid bridge coalescence powered by the precomputed empirical lookup tables (`_T0`–`_T4`). Elements on the same `z-index` merge naturally into a single organic drop when within `fusionDistance` (default `88 px`).
 - **Live React State Controls:**
   - **Bevel Width (`rim`):** `6–32 px` (default `16 px`)
   - **Refraction (`ior`):** `1.10–1.70` (default `1.46`)
   - **Thickness (`height`):** `6–34 px` (default `18 px`)
   - **Frosted Blur (`frosted`):** `0–30 px` (default `0 px`)
-  - **Liquid Fusion (`fusion`):** `true / false` toggle
 
 ## Getting Started
 

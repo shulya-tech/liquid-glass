@@ -20,13 +20,8 @@ export interface LiquidGlassOptions {
   frosted?: number;
 
   /**
-   * Enable liquid coalescence with neighboring glass elements (default: true).
-   * Set to false for static/isolated blocks to bypass proximity checks and maximize performance.
-   */
-  fusion?: boolean;
-
-  /**
-   * Proximity distance threshold in pixels for liquid fusion bridging (default: 40).
+   * Proximity distance threshold in pixels for liquid fusion bridging (default: 88).
+   * Elements with the same z-index coalesce automatically when within this distance.
    */
   fusionDistance?: number;
 
@@ -40,6 +35,11 @@ export interface LiquidGlassOptions {
    * Defaults to 0 (automatic: 1.5 for compact UI elements, 1.0 for elements >= 700px wide).
    */
   dpr?: number;
+
+  /**
+   * Optional explicit z-index for stage stacking ordering
+   */
+  zIndex?: number;
 
   /**
    * Optional border radius override in pixels
