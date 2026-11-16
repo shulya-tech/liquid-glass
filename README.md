@@ -113,9 +113,9 @@ Every component, hook, directive, and controller accepts the following configura
 | **`rim`** | `number` | **`16`** | `4` | `48` | Width of the curved perimeter bevel and specular highlight (in `px`). |
 | **`ior`** | `number` | **`1.46`** | `1.05` | `2.20` | Optical Index of Refraction controlling background bending intensity. |
 | **`height`** | `number` | **`18`** | `2` | `50` | Apparent elevation and optical thickness of the glass slab (in `px`). |
-| **`frosted`** | `number` | **`0`** | `0` | `32` | Gaussian surface diffusion radius in `px` (`0` = crystal clear, `>0` = frosted satin glass). |
-| **`fusion`** | `boolean` | **`true`** | — | — | Enables liquid surface coalescence with neighboring glass blocks. Set to `false` for isolated static blocks. |
-| **`fusionDistance`** | `number` | **`56`** | `10` | `120` | Distance threshold (in `px`) for liquid bridge formation between adjacent elements. |
+| **`frosted`** | `number` | **`0`** | `0` | `32` | Hardware Gaussian surface diffusion radius in `px` (`0` = crystal clear, `>0` = frosted satin glass). Always prefer over CSS `backdrop-filter`. |
+| **`fusionDistance`** | `number` | **`88`** | `10` | `200` | Distance threshold (in `px`) for liquid bridge formation between adjacent elements sharing the same `z-index`. |
+| **`zIndex`** | `number` | `auto` | — | — | Layer index controlling stacking order and liquid merging. Elements with the **exact same `z-index` automatically fuse** like physical liquid drops; elements with different `z-index` slide independently as separate optical layers. |
 | **`dpr`** | `number` | **`0`** | `0.5` | `3.0` | Custom device pixel ratio override (`0` = automatic adaptive DPR). |
 | **`borderRadius`** | `number \| null` | `null` | `0` | `999` | Optional corner radius override in `px` (inherits CSS `border-radius` by default). |
 

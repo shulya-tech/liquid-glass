@@ -294,16 +294,32 @@ export function paintDomSurfaces(ctx, dpr, vw, bw, bh, minY, maxY, originY, clus
           domCacheCtx.letterSpacing = parentStyle.letterSpacing;
         }
 
-        const parentRect = parent.getBoundingClientRect();
+        const totalChars = isGradient
+          ? lines.reduce((acc, l) => acc + (l.text ? l.text.length : 0), 0)
+          : 0;
+        let cumulativeChars = 0;
 
         for (let lIdx = 0; lIdx < lines.length; lIdx++) {
           const line = lines[lIdx];
           const lr = line.rect;
-          if (lr.bottom < minY || lr.top > maxScanY) continue;
+          const lineLen = line.text ? line.text.length : 0;
+          if (lr.bottom < minY || lr.top > maxScanY) {
+            cumulativeChars += lineLen;
+            continue;
+          }
 
           if (isGradient) {
-            const gradLeft = lr.left;
-            const gradRight = lr.right > lr.left ? lr.right : (lr.left + 100);
+            // Physically accurate multi-line gradient projection:
+            // Slices continuous CSS gradient across wrapped lines so words at the end
+            // of a line do NOT prematurely turn purple when the gradient spans across to the next line!
+            const tStart = totalChars > 0 ? cumulativeChars / totalChars : 0;
+            const tEnd = totalChars > 0 ? (cumulativeChars + lineLen) / totalChars : 1;
+            const lineSpan = Math.max(0.001, tEnd - tStart);
+            const lineWidth = Math.max(10, lr.right - lr.left);
+            const fullVirtualWidth = lineWidth / lineSpan;
+            const gradLeft = lr.left - tStart * fullVirtualWidth;
+            const gradRight = gradLeft + fullVirtualWidth;
+
             const grad = domCacheCtx.createLinearGradient(gradLeft, lr.top, gradRight, lr.top);
             grad.addColorStop(0, '#fb923c');
             grad.addColorStop(0.5, '#ec4899');
@@ -318,6 +334,7 @@ export function paintDomSurfaces(ctx, dpr, vw, bw, bh, minY, maxY, originY, clus
           }
 
           domCacheCtx.fillText(line.text, lr.left, lr.top);
+          cumulativeChars += lineLen;
         }
 
         domCacheCtx.restore();

@@ -460,7 +460,7 @@ export class WebGLGlassRenderer {
         typeof clusterOpts.fusionDistance === 'number'
           ? clusterOpts.fusionDistance
           : DEFAULT_FUSION_DISTANCE;
-      const fusionSpan = clusterOpts.fusion ? fusionDistance * dpr : 0;
+      const fusionSpan = fusionDistance * dpr;
       const clusterFrosted = clusterOpts.frosted || 0;
 
       gl.uniform1f(this.uRim, rimPx);

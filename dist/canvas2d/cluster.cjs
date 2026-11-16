@@ -45,7 +45,7 @@ exports.clearClusterOverlay = function clearClusterOverlay(ctx) {
  */
 exports.renderFusedCluster = function renderFusedCluster(ctx, sourceCtx, elements, rawOptions = {}, dpr = 1) {
   const options = normalizeOptions(rawOptions);
-  const fusionSpan = options.fusion ? (rawOptions.fusionDistance ?? DEFAULT_FUSION_DISTANCE) * dpr : 0;
+  const fusionSpan = (rawOptions.fusionDistance ?? DEFAULT_FUSION_DISTANCE) * dpr;
   const rimPx = Math.max(1, options.rim * dpr);
   const ior = options.ior;
   const heightPx = options.height * dpr;
@@ -117,7 +117,6 @@ exports.renderFusedCluster = function renderFusedCluster(ctx, sourceCtx, element
       halfH,
       r,
       isCircle,
-      fusion: b.fusion !== undefined ? Boolean(b.fusion) : options.fusion,
       tintR: b.tint ? b.tint[0] : 15,
       tintG: b.tint ? b.tint[1] : 23,
       tintB: b.tint ? b.tint[2] : 42,
@@ -164,7 +163,7 @@ exports.renderFusedCluster = function renderFusedCluster(ctx, sourceCtx, element
 
         if (i === 0) {
           dCluster = dShape;
-        } else if (b.fusion && span > 0.001) {
+        } else if (span > 0.001) {
           const diff = dCluster > dShape ? dCluster - dShape : dShape - dCluster;
           if (diff < span) {
             const h = span - diff;

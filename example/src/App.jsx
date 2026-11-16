@@ -256,6 +256,11 @@ function drawStageBackground(canvas, dpr = computeOptimalDpr(), time = 0) {
     canvas.height = bufH;
   }
 
+  const cssW = `${w}px`;
+  const cssH = `${h}px`;
+  if (canvas.style.width !== cssW) canvas.style.width = cssW;
+  if (canvas.style.height !== cssH) canvas.style.height = cssH;
+
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
 
@@ -380,7 +385,6 @@ export default function App() {
   const [ior, setIor] = useState(OPTICAL_DEFAULTS.ior);
   const [height, setHeight] = useState(OPTICAL_DEFAULTS.height);
   const [frosted, setFrosted] = useState(0);
-  const [fusion, setFusion] = useState(OPTICAL_DEFAULTS.fusion);
 
   // 1. «Золотое сечение» на старте (computeOptimalDpr)
   const initialDpr = computeOptimalDpr();
@@ -447,18 +451,26 @@ export default function App() {
     }
   }, [dpr]);
 
-  // Synchronous redraw when optical params or fusion change
+  // Synchronous redraw when optical params change
   useLayoutEffect(() => {
     redrawStageNow();
-  }, [rim, ior, height, frosted, fusion]);
+  }, [rim, ior, height, frosted]);
 
   // Top-left dragging: direct zero-overhead DOM tracking without React re-render hitch
   const handlePointerDown = useCallback((id, e) => {
     const target = shapesRef.current.find((s) => s.id === id);
     if (!target) return;
 
+    if (e.target && e.target.setPointerCapture && e.pointerId !== undefined) {
+      try {
+        e.target.setPointerCapture(e.pointerId);
+      } catch {}
+    }
+
     dragState.current = {
       id,
+      pointerId: e.pointerId,
+      targetEl: e.target,
       offX: e.clientX - target.x,
       offY: e.clientY - target.y,
       currentX: target.x,
@@ -495,7 +507,14 @@ export default function App() {
 
     const handlePointerUp = () => {
       if (!dragState.current) return;
-      const { id, currentX, currentY } = dragState.current;
+      const { id, currentX, currentY, pointerId, targetEl } = dragState.current;
+      if (targetEl && targetEl.releasePointerCapture && pointerId !== undefined) {
+        try {
+          if (targetEl.hasPointerCapture && targetEl.hasPointerCapture(pointerId)) {
+            targetEl.releasePointerCapture(pointerId);
+          }
+        } catch {}
+      }
       dragState.current = null;
       const target = shapesRef.current.find((s) => s.id === id);
       if (target) {
@@ -534,7 +553,6 @@ export default function App() {
           ior={ior}
           height={height}
           frosted={frosted}
-          fusion={fusion}
           dpr={dpr}
           className="glass-body"
           data-lg-tint="rgba(255, 255, 255, 0.18)"
@@ -611,15 +629,6 @@ export default function App() {
             onChange={(e) => setFrosted(Number(e.target.value))}
           />
         </div>
-
-        <label className="ctrl-toggle">
-          <input
-            type="checkbox"
-            checked={fusion}
-            onChange={(e) => setFusion(e.target.checked)}
-          />
-          <span>Liquid Fusion</span>
-        </label>
       </div>
     </>
   );

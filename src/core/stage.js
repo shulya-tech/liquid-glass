@@ -54,10 +54,10 @@ function ensureStageBuffers(customDpr = 0) {
   if (typeof document === 'undefined') return false;
   const dpr = getDevicePixelRatio(customDpr);
   const docEl = document.documentElement;
-  const vw = Math.max(1, window.innerWidth, docEl ? docEl.clientWidth : 0);
-  const vh = Math.max(1, window.innerHeight, docEl ? docEl.clientHeight : 0);
-  const bufW = Math.round(vw * dpr);
-  const bufH = Math.round(vh * dpr);
+  const vw = window.innerWidth || (docEl ? docEl.clientWidth : 1024);
+  const vh = window.innerHeight || (docEl ? docEl.clientHeight : 768);
+  const bufW = Math.max(1, Math.round(vw * dpr));
+  const bufH = Math.max(1, Math.round(vh * dpr));
 
   if (!stageCanvas) {
     stageCanvas = document.createElement('canvas');
@@ -131,8 +131,12 @@ function getTierSizeWithHysteresis(currentTier, maxDim) {
 function ensureWebGLRenderer(bufW = 1024, bufH = 1024) {
   if (typeof document === 'undefined') return false;
 
-  const w = bufW || Math.max(1, Math.round((window.innerWidth || 1024) * (window.devicePixelRatio || 1)));
-  const h = bufH || Math.max(1, Math.round((window.innerHeight || 1024) * (window.devicePixelRatio || 1)));
+  const docEl = document.documentElement;
+  const vw = window.innerWidth || (docEl ? docEl.clientWidth : 1024);
+  const vh = window.innerHeight || (docEl ? docEl.clientHeight : 768);
+  const sysDpr = window.devicePixelRatio || 1;
+  const w = bufW || Math.max(1, Math.round(vw * sysDpr));
+  const h = bufH || Math.max(1, Math.round(vh * sysDpr));
 
   if (!webglCanvas) {
     const canvas = document.createElement('canvas');
@@ -142,8 +146,8 @@ function ensureWebGLRenderer(bufW = 1024, bufH = 1024) {
       position: fixed;
       left: 0;
       top: 0;
-      width: 100vw;
-      height: 100vh;
+      width: ${vw}px;
+      height: ${vh}px;
       pointer-events: none;
       display: block;
       visibility: hidden;
@@ -158,6 +162,14 @@ function ensureWebGLRenderer(bufW = 1024, bufH = 1024) {
   if (webglCanvas.width !== w || webglCanvas.height !== h) {
     webglCanvas.width = w;
     webglCanvas.height = h;
+  }
+  const cssW = `${vw}px`;
+  const cssH = `${vh}px`;
+  if (webglCanvas.style.width !== cssW) {
+    webglCanvas.style.width = cssW;
+  }
+  if (webglCanvas.style.height !== cssH) {
+    webglCanvas.style.height = cssH;
   }
 
   if (!webglRenderer) {
@@ -258,8 +270,8 @@ function renderAllActiveLenses() {
     }
     const r = ctrl.getRect ? ctrl.getRect() : ctrl.element.getBoundingClientRect();
     if (!r || r.width <= 4 || r.height <= 4) continue;
-    // Keep off-screen fusion anchors in active list when fusion is enabled
-    const margin = ctrl.options.fusion ? DEFAULT_FUSION_DISTANCE : 0;
+    // Keep off-screen fusion anchors in active list when fusion distance is configured
+    const margin = (ctrl.options.fusionDistance ?? DEFAULT_FUSION_DISTANCE) > 0 ? DEFAULT_FUSION_DISTANCE : 0;
     if (
       r.bottom < -margin ||
       r.top > vh + margin ||
@@ -306,16 +318,17 @@ function renderAllActiveLenses() {
   }
 
   for (let i = 0; i < n; i++) {
-    if (!visible[i].ctrl.options.fusion) continue;
     const zI = visible[i].ctrl._cachedZIndex || 20;
-    const threshI = visible[i].ctrl.options.fusionDistance || DEFAULT_FUSION_DISTANCE;
+    const threshI = visible[i].ctrl.options.fusionDistance ?? DEFAULT_FUSION_DISTANCE;
+    if (threshI <= 0) continue;
     for (let j = i + 1; j < n; j++) {
-      if (!visible[j].ctrl.options.fusion) continue;
       const zJ = visible[j].ctrl._cachedZIndex || 20;
       // STRICT: only elements with the exact same z-index can coalesce/fuse!
       if (zI !== zJ) continue;
 
-      const baseThresh = Math.max(threshI, visible[j].ctrl.options.fusionDistance || DEFAULT_FUSION_DISTANCE);
+      const threshJ = visible[j].ctrl.options.fusionDistance ?? DEFAULT_FUSION_DISTANCE;
+      if (threshJ <= 0) continue;
+      const baseThresh = Math.max(threshI, threshJ);
       const idA = visible[i].ctrl._id || (i + 1);
       const idB = visible[j].ctrl._id || (j + 1);
       const pairKey = idA < idB ? `${idA}:${idB}` : `${idB}:${idA}`;
@@ -471,7 +484,6 @@ function renderAllActiveLenses() {
       borderRadius: ctrl._getRadius(),
       shape: ctrl._getShape(),
       tint: ctrl._tint,
-      fusion: ctrl.options.fusion,
       fused: group.length > 1
     }));
 

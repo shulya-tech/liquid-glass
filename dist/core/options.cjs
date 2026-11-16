@@ -13,7 +13,6 @@ const OPTICAL_DEFAULTS = exports.OPTICAL_DEFAULTS = Object.freeze({
   ior: 1.46,
   height: 18,
   frosted: 0,
-  fusion: true,
   fusionDistance: 88,
   dpr: 0
 });
@@ -62,7 +61,6 @@ exports.normalizeOptions = function normalizeOptions(options = {}) {
       OPTICAL_LIMITS.frosted.min,
       OPTICAL_LIMITS.frosted.max
     ),
-    fusion: options.fusion !== undefined ? Boolean(options.fusion) : OPTICAL_DEFAULTS.fusion,
     fusionDistance:
       typeof options.fusionDistance === 'number' && !Number.isNaN(options.fusionDistance)
         ? Math.max(10, Math.min(200, options.fusionDistance))

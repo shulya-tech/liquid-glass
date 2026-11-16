@@ -228,10 +228,13 @@ export class LiquidGlassController {
   }
 
   isTouchingAny(threshold = 40) {
-    if (!this.options.fusion || !this.element) return false;
+    if (!this.element) return false;
+    const myZ = this._cachedZIndex || 20;
     const r1 = this.element.getBoundingClientRect();
     for (const other of controllerRegistry) {
-      if (other === this || !other.element || !other.options.fusion) continue;
+      if (other === this || !other.element) continue;
+      const otherZ = other._cachedZIndex || 20;
+      if (myZ !== otherZ) continue;
       const r2 = other.element.getBoundingClientRect();
       if (areRectsTouching(r1, r2, threshold)) return true;
     }
@@ -264,7 +267,7 @@ export class LiquidGlassController {
       changed = true;
     }
 
-    for (const key of ['rim', 'ior', 'height', 'frosted', 'fusion', 'fusionDistance', 'dpr']) {
+    for (const key of ['rim', 'ior', 'height', 'frosted', 'fusionDistance', 'dpr']) {
       if (merged[key] !== this.options[key]) {
         this.options[key] = merged[key];
         changed = true;
