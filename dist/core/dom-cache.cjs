@@ -175,7 +175,7 @@ exports.paintDomSurfaces = function paintDomSurfaces(ctx, dpr, vw, bw, bh, minY,
   if (mainEl) {
     // 1. Draw visible block surfaces (cards, buttons, pills, inputs) inside <main> and <footer>
     const surfaceEls = document.querySelectorAll(
-      'main div.rounded-2xl, main div.rounded-xl, main div.rounded-lg, main a.rounded-2xl, main a.rounded-xl, main a.rounded-lg, main button, main a.inline-flex, main input, main textarea, main span.rounded-lg, main span.rounded-full, main span.rounded-md, footer div.rounded-2xl, footer a, footer button'
+      'main [class*="backdrop-blur"], footer [class*="backdrop-blur"], main div.rounded-2xl, main div.rounded-xl, main div.rounded-lg, main a.rounded-2xl, main a.rounded-xl, main a.rounded-lg, main button, main a.inline-flex, main input, main textarea, main span.rounded-lg, main span.rounded-full, main span.rounded-md, footer div.rounded-2xl, footer a, footer button'
     );
     for (let i = 0; i < surfaceEls.length; i++) {
       const el = surfaceEls[i];
@@ -194,6 +194,13 @@ exports.paintDomSurfaces = function paintDomSurfaces(ctx, dpr, vw, bw, bh, minY,
         domCacheCtx.rect(r.left, r.top, r.width, r.height);
       }
 
+      // Step 1: Opaque base fill (#080e1d).
+      // Solidly fills the card path with 100% opaque dark background before drawing any tints.
+      // This is the absolute guarantee that background canvas particles underneath the card
+      // are 100% blocked and occluded, matching CSS backdrop-blur behavior!
+      domCacheCtx.fillStyle = '#080e1d';
+      domCacheCtx.fill();
+
       const bgImg = style.backgroundImage;
       const inlineBg = el.style && el.style.background;
       const compBg = style.backgroundColor;
@@ -202,6 +209,9 @@ exports.paintDomSurfaces = function paintDomSurfaces(ctx, dpr, vw, bw, bh, minY,
         (inlineBg && inlineBg.includes('gradient')) ||
         (compBg && compBg !== 'transparent' && compBg !== 'rgba(0, 0, 0, 0)');
 
+      // Step 2: Composite the card's real background on top of the solid base.
+      // Canvas 2D will blend compBg (whether rgba, color(srgb...), or color-mix) directly
+      // over #080e1d, keeping the resulting alpha at 1.0!
       if ((bgImg && bgImg.includes('gradient')) || (inlineBg && inlineBg.includes('gradient'))) {
         const g = domCacheCtx.createLinearGradient(r.left, r.top, r.right, r.bottom);
         g.addColorStop(0, '#fb923c');
@@ -550,8 +560,11 @@ exports.renderDomSurfacesToCache = function renderDomSurfacesToCache(
   vh,
   bw,
   bh,
+  scanMinY = -40,
+  scanMaxY = 0,
   clusterBoxes = null
 ) {
   if (!domCacheCanvas || !domCacheCtx) return;
-  paintDomSurfaces(domCacheCtx, dpr, vw, bw, bh, -40, vh + 40, 0, clusterBoxes);
+  const effMaxY = scanMaxY > 0 ? scanMaxY : vh + 40;
+  paintDomSurfaces(domCacheCtx, dpr, vw, bw, bh, scanMinY, effMaxY, 0, clusterBoxes);
 }

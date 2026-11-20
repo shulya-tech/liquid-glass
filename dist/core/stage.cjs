@@ -182,17 +182,20 @@ function ensureWebGLRenderer(bufW = 1024, bufH = 1024) {
   return true;
 }
 
+let cachedUserBgCanvas = null;
+
 /**
  * Captures the entire live viewport background into stageCanvas
  * so glass lenses can refract any location with zero black cutoff edges.
  */
-function captureViewportStage(customDpr = 0) {
+function captureViewportStage(customDpr = 0, scanMinY = -40, scanMaxY = 0) {
   if (!ensureStageBuffers(customDpr)) return;
   const dpr = getDevicePixelRatio(customDpr);
   const bw = stageCanvas.width;
   const bh = stageCanvas.height;
   const vw = Math.round(bw / dpr);
   const vh = Math.round(bh / dpr);
+  const effMaxY = scanMaxY > 0 ? scanMaxY : vh + 40;
 
   // 1. Re-render DOM overlay cards and text when dirty
   if (domCacheDirty || !domCacheCanvas) {
@@ -204,7 +207,9 @@ function captureViewportStage(customDpr = 0) {
       vw,
       vh,
       bw,
-      bh
+      bh,
+      scanMinY,
+      effMaxY
     );
     domCacheDirty = false;
   }
@@ -214,34 +219,42 @@ function captureViewportStage(customDpr = 0) {
   stageCtx.fillRect(0, 0, bw, bh);
 
   // 3. Copy any genuine user/page background canvas using physical buffer pixels (exclude all LiquidGlass canvases)
-  const allCanvases = document.querySelectorAll('canvas');
-  for (let i = 0; i < allCanvases.length; i++) {
-    const c = allCanvases[i];
-    if (
-      c === stageCanvas ||
-      c === blurCanvas ||
-      c === domCacheCanvas ||
-      c === webglCanvas ||
-      (c.className && String(c.className).includes('lg-')) ||
-      c.getAttribute('data-lg-ignore') === 'true'
-    ) {
-      continue;
-    }
-    if (c.width > 0 && c.height > 0) {
-      try {
-        const cr = c.getBoundingClientRect();
-        if (cr.width > 0 && cr.height > 0) {
-          stageCtx.drawImage(
-            c,
-            Math.round(cr.left * dpr),
-            Math.round(cr.top * dpr),
-            Math.round(cr.width * dpr),
-            Math.round(cr.height * dpr)
-          );
-        }
-      } catch {
-        // Ignore cross-origin canvas if any
+  if (!cachedUserBgCanvas || !cachedUserBgCanvas.isConnected) {
+    cachedUserBgCanvas = null;
+    const allCanvases = document.querySelectorAll('canvas');
+    for (let i = 0; i < allCanvases.length; i++) {
+      const c = allCanvases[i];
+      if (
+        c === stageCanvas ||
+        c === blurCanvas ||
+        c === domCacheCanvas ||
+        c === webglCanvas ||
+        (c.className && String(c.className).includes('lg-')) ||
+        c.getAttribute('data-lg-ignore') === 'true'
+      ) {
+        continue;
       }
+      if (c.width > 0 && c.height > 0) {
+        cachedUserBgCanvas = c;
+        break;
+      }
+    }
+  }
+
+  if (cachedUserBgCanvas && cachedUserBgCanvas.width > 0 && cachedUserBgCanvas.height > 0) {
+    try {
+      const cr = cachedUserBgCanvas.getBoundingClientRect();
+      if (cr.width > 0 && cr.height > 0) {
+        stageCtx.drawImage(
+          cachedUserBgCanvas,
+          Math.round(cr.left * dpr),
+          Math.round(cr.top * dpr),
+          Math.round(cr.width * dpr),
+          Math.round(cr.height * dpr)
+        );
+      }
+    } catch {
+      // Ignore cross-origin canvas if any
     }
   }
 
@@ -389,9 +402,19 @@ function renderAllActiveLenses() {
 
   ensureStageBuffers(activeDpr);
 
+  let minLensY = vh;
+  let maxLensY = 0;
+  for (let i = 0; i < n; i++) {
+    const r = visible[i].rect;
+    if (r.top < minLensY) minLensY = r.top;
+    if (r.bottom > maxLensY) maxLensY = r.bottom;
+  }
+  const scanMinY = Math.max(-40, Math.floor(minLensY - 40));
+  const scanMaxY = Math.min(vh + 40, Math.ceil(maxLensY + 40));
+
   const needsCapture = stageDirty || !stageCanvas || !stageCtx || (webglRenderer && !webglRenderer.hasSourceTex);
   if (needsCapture) {
-    captureViewportStage(activeDpr);
+    captureViewportStage(activeDpr, scanMinY, scanMaxY);
     stageDirty = false;
   }
 
