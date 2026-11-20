@@ -246,42 +246,100 @@ exports.paintDomSurfaces = function paintDomSurfaces(ctx, dpr, vw, bw, bh, minY,
 
       try {
         domCacheCtx.save();
-        const parent = img.parentElement;
-        const pRad = parent && parent.className && typeof parent.className === 'string' && parent.className.includes('rounded')
-          ? 16
-          : 0;
-        if (pRad > 0 && typeof domCacheCtx.roundRect === 'function') {
+
+        const imgStyle = window.getComputedStyle(img);
+        const objectFit = imgStyle.objectFit || 'fill';
+        const objectPos = imgStyle.objectPosition || '50% 50%';
+
+        // Parse object-position (e.g. "50% 50%", "center center", "center top")
+        let posX = 0.5;
+        let posY = 0.5;
+        const posParts = objectPos.trim().split(/\s+/);
+        if (posParts.length >= 1) {
+          if (posParts[0] === 'left') posX = 0;
+          else if (posParts[0] === 'right') posX = 1;
+          else if (posParts[0] === 'center') posX = 0.5;
+          else if (posParts[0].endsWith('%')) posX = (parseFloat(posParts[0]) || 50) / 100;
+        }
+        if (posParts.length >= 2) {
+          if (posParts[1] === 'top') posY = 0;
+          else if (posParts[1] === 'bottom') posY = 1;
+          else if (posParts[1] === 'center') posY = 0.5;
+          else if (posParts[1].endsWith('%')) posY = (parseFloat(posParts[1]) || 50) / 100;
+        }
+
+        // Ancestor clipping & border-radius (e.g. rounded-2xl cards with overflow-hidden)
+        let clipRad = 0;
+        let clipRect = { left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height };
+        let ancestor = img.parentElement;
+        for (let a = 0; a < 4 && ancestor && ancestor !== document.body; a++) {
+          const aStyle = window.getComputedStyle(ancestor);
+          const aRad = parseFloat(aStyle.borderRadius) || 0;
+          const aOverflow = aStyle.overflow || aStyle.overflowX || '';
+          if (aRad > 0 && !clipRad) {
+            clipRad = aRad;
+          }
+          if (aOverflow === 'hidden' || aOverflow === 'clip' || aRad > 0) {
+            const ar = ancestor.getBoundingClientRect();
+            clipRect = {
+              left: Math.max(clipRect.left, ar.left),
+              top: Math.max(clipRect.top, ar.top),
+              right: Math.min(clipRect.right, ar.right),
+              bottom: Math.min(clipRect.bottom, ar.bottom),
+              width: Math.max(0, Math.min(clipRect.right, ar.right) - Math.max(clipRect.left, ar.left)),
+              height: Math.max(0, Math.min(clipRect.bottom, ar.bottom) - Math.max(clipRect.top, ar.top))
+            };
+          }
+          ancestor = ancestor.parentElement;
+        }
+
+        if (clipRad > 0 && typeof domCacheCtx.roundRect === 'function') {
           domCacheCtx.beginPath();
-          domCacheCtx.roundRect(r.left, r.top, r.width, r.height, pRad);
+          domCacheCtx.roundRect(clipRect.left, clipRect.top, clipRect.width, clipRect.height, clipRad);
+          domCacheCtx.clip();
+        } else if (clipRect.width < r.width || clipRect.height < r.height) {
+          domCacheCtx.beginPath();
+          domCacheCtx.rect(clipRect.left, clipRect.top, clipRect.width, clipRect.height);
           domCacheCtx.clip();
         }
 
-        let sourceToDraw = img;
-        const targetW = Math.max(1, Math.round(r.width * dpr));
-        const targetH = Math.max(1, Math.round(r.height * dpr));
+        const nw = img.naturalWidth || r.width;
+        const nh = img.naturalHeight || r.height;
 
-        // High-performance thumbnail caching:
-        // Downscaling massive 3K/4K images (e.g. 2880x1576) in Canvas 2D takes ~14ms per frame on CPU/GPU.
-        // We cache a downsampled offscreen canvas thumbnail ONCE, dropping frame draw cost from 14ms to 0.02ms!
-        if (imgThumbCache && (img.naturalWidth > targetW * 1.3 || img.naturalHeight > targetH * 1.3)) {
-          let cached = imgThumbCache.get(img);
-          if (!cached || cached.width !== targetW || cached.height !== targetH) {
-            const off = document.createElement('canvas');
-            off.width = targetW;
-            off.height = targetH;
-            const offCtx = off.getContext('2d');
-            if (offCtx) {
-              offCtx.drawImage(img, 0, 0, targetW, targetH);
-              cached = { canvas: off, width: targetW, height: targetH };
-              imgThumbCache.set(img, cached);
-            }
+        let sx = 0, sy = 0, sw = nw, sh = nh;
+        let dx = r.left, dy = r.top, dw = r.width, dh = r.height;
+
+        if (objectFit === 'cover' && nw > 0 && nh > 0 && dw > 0 && dh > 0) {
+          const imgAspect = nw / nh;
+          const boxAspect = dw / dh;
+          if (imgAspect > boxAspect) {
+            // Wider than box: full height visible, sides cropped
+            sh = nh;
+            sw = nh * boxAspect;
+            sx = (nw - sw) * posX;
+            sy = 0;
+          } else {
+            // Taller than box: full width visible, top/bottom cropped!
+            sw = nw;
+            sh = nw / boxAspect;
+            sx = 0;
+            sy = (nh - sh) * posY;
           }
-          if (cached && cached.canvas) {
-            sourceToDraw = cached.canvas;
+        } else if (objectFit === 'contain' && nw > 0 && nh > 0 && dw > 0 && dh > 0) {
+          const imgAspect = nw / nh;
+          const boxAspect = dw / dh;
+          if (imgAspect > boxAspect) {
+            const scaledH = dw / imgAspect;
+            dy = r.top + (dh - scaledH) * posY;
+            dh = scaledH;
+          } else {
+            const scaledW = dh * imgAspect;
+            dx = r.left + (dw - scaledW) * posX;
+            dw = scaledW;
           }
         }
 
-        domCacheCtx.drawImage(sourceToDraw, r.left, r.top, r.width, r.height);
+        domCacheCtx.drawImage(img, sx, sy, sw, sh, dx, dy, dw, dh);
         domCacheCtx.restore();
       } catch {
         domCacheCtx.restore();
